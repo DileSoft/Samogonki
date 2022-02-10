@@ -3,7 +3,7 @@
 
 #include "StdAfx.h"
 
-#include <windows.h>
+#include <windef.h>
 #include <wininet.h>
 
 #include <stdio.h>

@@ -1889,7 +1889,7 @@ void mchRacerStats::save(XStream* fh)
 	*fh < Lap < Checkpoint < Turn < NStar;
 	fh -> write(partFlags,ARCANE_MAX);
 
-	*fh < strlen(name);
+	*fh < (unsigned long) strlen(name);
 	fh -> write(name,strlen(name));
 
 	fh -> write(mechos_config,30);
@@ -1911,7 +1911,7 @@ void mchRacerStats::save(XBuffer* fh)
 	*fh < Lap < Checkpoint < Turn < NStar;
 	fh -> write(partFlags,ARCANE_MAX);
 
-	*fh < strlen(name);
+	*fh < (unsigned long) strlen(name);
 	fh -> write(name,strlen(name));
 
 	fh -> write(mechos_config,30);

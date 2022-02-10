@@ -14,10 +14,10 @@
 
 #ifndef _WIN32
 #define _MAX_PATH 1024
-#include "filesystem.h"
 #include "iniparser.h"
-#include "port.h"
+#include "filesystem.h"
 #endif
+#include "port.h"
 
 void xINI_FileKey::putValue(const char* p)
 {
@@ -90,9 +90,9 @@ void xINI_FileSection::putKey(const char* key_name,const char* key_value)
 
 xINI_File::xINI_File(const char* nm)
 {
-	const auto path = file::normalize_path(nm);
+	// const auto path = file::normalize_path(nm);
 
-	name = strdup(path.c_str());
+	name = strdup(nm);
 
 	list = NULL;
 }
@@ -293,8 +293,8 @@ void xINI_FileSection::save(XStream& fh,int binary)
 		fh < "\r\n";
 	}
 	else {
-		fh < keyList.size();
-		fh < strlen(name) < name;
+		fh < (unsigned long) keyList.size();
+		fh < (unsigned long) strlen(name) < name;
 		while(p){
 			p -> save(fh,binary);
 			p = p -> next;
@@ -341,7 +341,7 @@ void xINI_FileKey::save(XStream& fh,int binary)
 			fh < name < "=" < string < "\r\n";
 	}
 	else {
-		fh < strlen(name) < name < strlen(string) < string;
+		fh < (unsigned long) strlen(name) < name < (unsigned long) strlen(string) < string;
 	}
 }
 

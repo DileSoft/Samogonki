@@ -1,4 +1,4 @@
-#include <windows.h>
+#include <windef.h>
 #define DECODER
 #define VERSION 1
 #define MAX_SV  7

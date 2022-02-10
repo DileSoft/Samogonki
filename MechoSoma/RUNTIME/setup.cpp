@@ -27,8 +27,8 @@
 #define _MAX_PATH 1024
 #define MAX_PATH 1024
 #include "filesystem.h"
-#include "port.h"
 #endif
+#include "port.h"
 
 #include "CameraDispatcher.h"
 #include "Xreal_utl.h"
@@ -202,10 +202,10 @@ char* getIniKey(char* fname,char* section,char* key)
 
 	if(!xINI_InitFlag) xINI_Init();
 
-	const auto path = file::normalize_path(fname);
+	// const auto path = file::normalize_path(fname);
 
 	if(xINI_Enable){
-		p = xINI_GetKey(path.c_str(),section,key);
+		p = xINI_GetKey(fname,section,key);
 		if(p)
 			strcpy(buf,p);
 		else
@@ -214,7 +214,7 @@ char* getIniKey(char* fname,char* section,char* key)
 
 #ifdef _WIN32
 	if(!p){
-		if(!GetPrivateProfileString(section,key,NULL,buf,256,path))
+		if(!GetPrivateProfileString(section,key,NULL,buf,256,fname))
 			*buf = 0;
 	}
 #endif

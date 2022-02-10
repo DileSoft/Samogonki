@@ -11,7 +11,7 @@
 /*
 namespace KDWIN
 {
-#include <windows.h>
+#include <windef.h>
 };
 using namespace KDWIN;
 */

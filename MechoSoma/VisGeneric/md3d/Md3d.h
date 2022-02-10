@@ -12,7 +12,7 @@
 #endif
 
 #ifdef _WIN32
-#include <windows.h>
+#include <windef.h>
 #include <d3d.h>
 #else
 #include "d3d_port.h"

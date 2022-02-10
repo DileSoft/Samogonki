@@ -6,7 +6,7 @@
 //
 // Copyright (c) 1999 Microsoft Corp. All rights reserved.
 //-----------------------------------------------------------------------------
-#include <windows.h>
+#include <windef.h>
 #include "WavRead.h"
 
 

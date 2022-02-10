@@ -3,8 +3,8 @@
 #include "Dummy.h"
 #include "HashStringGroup.h"
 
-#ifndef _WIN32
 #include "port.h"
+#ifndef _WIN32
 #endif
 
 //////////////////////////////////////////////////////////////////////////

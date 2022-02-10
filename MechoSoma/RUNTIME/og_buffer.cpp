@@ -6,8 +6,8 @@
 
 #include "online_game.h"
 
-#ifndef _WIN32
 #include "port.h"
+#ifndef _WIN32
 #endif
 
 /* ----------------------------- STRUCT SECTION ----------------------------- */

@@ -7,8 +7,8 @@
 #include "sqexp.h"
 #endif
 
-#ifndef _WIN32
 #include "port.h"
+#ifndef _WIN32
 #endif
 
 //int editCh_point=-1;

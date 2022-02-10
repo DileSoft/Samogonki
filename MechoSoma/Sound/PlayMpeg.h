@@ -12,6 +12,8 @@ typedef void *LPVOID;
 typedef uint32_t DWORD;
 #define WINAPI
 #define NULL 0
+#else
+#include "windef.h"
 #endif
 
 #define MPP_STAT

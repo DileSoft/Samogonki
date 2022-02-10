@@ -1,4 +1,4 @@
-#include <windows.h>
+#include <windef.h>
 #include "mp+\mppdec.h"
 #include <dsound.h>
 #include "PlayMpeg.h"

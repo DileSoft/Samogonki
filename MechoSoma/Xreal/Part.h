@@ -3,8 +3,8 @@
 //////////////////////////////////////////////////////////////////
 #include "Base.h"
 
-#ifndef _WIN32
 #include "port.h"
+#ifndef _WIN32
 #endif
 
 // Индекс для обращения к массиву деталей (0-engine, front, back, rfw, rbw, lfw, lbw)

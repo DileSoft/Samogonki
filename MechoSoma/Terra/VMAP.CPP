@@ -350,37 +350,37 @@ void vrtMap::saveTrPal(void)
 {
 	// Set Color water;
 	char buf [16];
-	SaveINIstringV(GetTargetName(wTable[cWorld].fname),"Global Parameters","Color H2O",port_itoa(H2OC,buf,10));
-	SaveINIstringV(GetTargetName(wTable[cWorld].fname),"Global Parameters","Alpha H2O",port_itoa(H2OA,buf,10));
+	SaveINIstringV(GetTargetName(wTable[cWorld].fname),"Global Parameters","Color H2O",itoa(H2OC,buf,10));
+	SaveINIstringV(GetTargetName(wTable[cWorld].fname),"Global Parameters","Alpha H2O",itoa(H2OA,buf,10));
 
 	vMap->pmap.open(GetTargetName(vMap->paletteName),XS_OUT);
 	vMap->pmap.write(&(vMap->TrPal[0][0]),TERRAIN_MAX*256*2);
 	vMap->pmap.close();
 }
 
-#ifdef _WIN32
-int getTick(void)
-#define CPUID __asm _emit 0xf __asm _emit 0xa2
-#define RDTSC __asm _emit 0xf __asm _emit 0x31
-{
-	int time;
-	__asm {
-		push ebx
-		push ecx
-		push edx
-		xor eax,eax
-		CPUID
-		RDTSC
-		mov [time],eax
-		xor eax,eax
-		CPUID
-		pop edx
-		pop ecx
-		pop ebx
-	}
-	return time;
-}
-#endif
+// #ifdef _WIN32
+// int getTick(void)
+// #define CPUID __asm _emit 0xf __asm _emit 0xa2
+// #define RDTSC __asm _emit 0xf __asm _emit 0x31
+// {
+// 	int time;
+// 	__asm {
+// 		push ebx
+// 		push ecx
+// 		push edx
+// 		xor eax,eax
+// 		CPUID
+// 		RDTSC
+// 		mov [time],eax
+// 		xor eax,eax
+// 		CPUID
+// 		pop edx
+// 		pop ecx
+// 		pop ebx
+// 	}
+// 	return time;
+// }
+// #endif
 void vrtMap::calcH2Ocolor(int terr)
 {
 #ifdef _USE_NOT_XGRAPH_
@@ -1879,7 +1879,7 @@ int vrtMap::loadClBufForRender(int X,int Y,int num_track)
 	int i,j;
 	XBuffer buft;
 	char tmpstr[10];
-	buft < "i_track" < port_itoa(num_track%10,tmpstr,10) < ".tga";
+	buft < "i_track" < itoa(num_track%10,tmpstr,10) < ".tga";
 	XStream ss(0);
 #ifdef _MECHOSOMA_
 	if(!vmapOpenResource(GetTargetName(buft),ss)) return 0;
@@ -1919,7 +1919,7 @@ int vrtMap::loadClBuf(int X,int Y,int num_track)
 	int i,j;
 	XBuffer buft;
 	char tmpstr[10];
-	buft < "track" < port_itoa(num_track%10,tmpstr,10) < ".tga";
+	buft < "track" < itoa(num_track%10,tmpstr,10) < ".tga";
 	XStream ss(0);
 #ifdef _MECHOSOMA_
 	if(!vmapOpenResource(GetTargetName(buft), ss)){
@@ -2054,7 +2054,7 @@ int vrtMap::loadClBufJ(int X,int Y,int num_track)
 	int i,j=0;
 	XBuffer buft;
 	char tmpstr[10];
-	buft < "track" < port_itoa(num_track%10,tmpstr,10) < ".jpg";
+	buft < "track" < itoa(num_track%10,tmpstr,10) < ".jpg";
 
 
 	struct jpeg_decompress_struct cinfo;
