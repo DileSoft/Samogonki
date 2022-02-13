@@ -19,7 +19,7 @@ cUnknownClass* cVisGeneric::CreateGraph(int xScr,int yScr,int GraphMode,int Full
 	cRenderDevice *RenderDevice=new cRenderDevice;
 	RenderDevice->Attach(IGraph3d);
 	P3D->Attach(RenderDevice);
-	RenderDevice->GetIGraph3d()->GetWindowHandle(&XGR_hWnd);
+	RenderDevice->GetIGraph3d()->GetWindowHandle((HWND*)&XGR_hWnd);
 	return RenderDevice;
 }
 int cVisGeneric::ReInitGraph(cUnknownClass *URenderDevice,int xScr,int yScr,int GraphMode,int FullScr,int ColorBit)
@@ -33,7 +33,7 @@ int cVisGeneric::ReInitGraph(cUnknownClass *URenderDevice,int xScr,int yScr,int 
 	RenderDevice->GetIGraph3d()->ReInit(xScr,yScr,mode,0,0);
 	RenderDevice->GetIGraph3d()->SetClipRect(1,1,xScr-1,yScr-1);
 	RenderDevice->Attach(RenderDevice->GetIGraph3d());
-	RenderDevice->GetIGraph3d()->GetWindowHandle(&XGR_hWnd);
+	RenderDevice->GetIGraph3d()->GetWindowHandle((HWND*)&XGR_hWnd);
 	return 0;
 }
 int cVisGeneric::GetGraphInfo(cUnknownClass *URenderDevice,int *xScr,int *yScr,int *GraphMode,int *FullScr,int *ColorBit)

@@ -1,7 +1,9 @@
 #ifndef __FILEASC_H__
 #define __FILEASC_H__
 
+#define Unknown blah2
 #include "3dsftk.h"
+#define Unknown blah3
 #include "stddef.h"
 #include "stdlib.h"
 #include "time.h"

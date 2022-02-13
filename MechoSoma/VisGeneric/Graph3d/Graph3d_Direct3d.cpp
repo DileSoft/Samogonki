@@ -168,7 +168,7 @@ int cGraph3dDirect3D::BeginScene()
 	{
 		SwitchRenderScene=0;
 		char str[256];
-		port_ultoa(err,str,10);
+		ultoa(err,str,10);
 		ErrAbort(str);
 	}
 	extern int gb_CurrentTexture;
@@ -469,7 +469,7 @@ int cGraph3dDirect3D::SetMaterial(eMaterialMode material)
 int cGraph3dDirect3D::SetRenderState(eRenderStateOption option,int value)
 {
 	if(!SwitchRenderScene) return 1;
-	_D3DRENDERSTATETYPE type;
+	D3DRENDERSTATETYPE type;
 	switch(option)
 	{
 		case RENDERSTATE_NULL:

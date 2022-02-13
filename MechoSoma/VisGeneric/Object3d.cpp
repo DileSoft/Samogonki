@@ -17,7 +17,7 @@
 #include "GameClient.h"
 #ifdef _WIN32
 #include "Win32f.h"
-#include "my_STL.h"
+#include "../../XLibsSpring2004/my_STL.h"
 #else
 #include "TERRA.H"
 #define DBGCHECK

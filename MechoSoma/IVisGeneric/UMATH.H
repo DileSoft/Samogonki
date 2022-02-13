@@ -9,6 +9,7 @@
 
 #include <math.h>
 #include "xmath.h"
+#define byte blah
 
 #define EQUAL_FLT(a,b)								(fabs((a)-(b))<.001f)
 #define SET_BIT(a,b)								(a)|=(b)

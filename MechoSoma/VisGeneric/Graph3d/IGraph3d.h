@@ -2,7 +2,7 @@
 #define __IGRAPH3D_H__
 
 #ifdef _WIN32
-#include <windef.h>
+// #include <windows.h>
 #include <ddraw.h>
 #else
 #define NULL 0

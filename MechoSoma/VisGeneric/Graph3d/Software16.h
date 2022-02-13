@@ -3,14 +3,10 @@
 
 #ifndef _MROUND_
 #define _MROUND_
+#include <math.h>
 inline int mround(float x)
 {
-	int a;
-	_asm {
-		fld x
-		fistp dword ptr a
-	}
-	return a;
+	return round(x);
 }
 #endif //_MROUND_
 
