@@ -128,7 +128,7 @@ MD3DERROR Renderer::d3dEndScene() {
       .height = 1,
       .usage = SG_USAGE_IMMUTABLE,
       .pixel_format = SG_PIXELFORMAT_RGBA8,
-      .data = nullData,
+      // .data = nullData,
   });
 
   auto projection_matrix = make_ortho_projection(0, 800, 600, 0, -1, 1);
@@ -476,12 +476,12 @@ float* matrix_make_rows(float m00, float m10, float m20, float m30, float m01, f
   // clang-format on
 }
 
-float* make_ortho_projection(float left, float right, float bottom, float top, float near, float far) {
+float* make_ortho_projection(float left, float right, float bottom, float top, float near1, float far1) {
   // clang-format off
   return matrix_make_rows(
       2.0f / (right - left), 0, 0, (left + right) / (left - right),
       0, 2.0f / (top - bottom), 0, (top + bottom) / (bottom - top),
-      0, 0, 1.0f / (far - near), near / (near - far),
+      0, 0, 1.0f / (far1 - near1), near1 / (near1 - far1),
       0, 0, 0, 1.0f
   );
   // clang-format on
