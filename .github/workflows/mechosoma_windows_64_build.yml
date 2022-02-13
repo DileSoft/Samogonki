@@ -24,13 +24,13 @@ jobs:
         unzip'
     - uses: actions/checkout@v1
     - name: mechosoma -- create build dir
-      run: msys2 -c 'mkdir build'
+      run: msys2 -c 'mkdir MechoSoma/build'
     - name: mechosoma -- configure
       run: msys2 -c 'cmake -DCMAKE_BUILD_TYPE=Debug -G Ninja ..'
-      working-directory: build
+      working-directory: MechoSoma/build
     - name: mechosoma -- make
       run: msys2 -c 'ninja'
-      working-directory: build
+      working-directory: MechoSoma/build
     - name: mechosoma -- prepare release folder
       run: |
         msys2 -c 'mkdir -p mechosoma/bin'
@@ -47,8 +47,8 @@ jobs:
         msys2 -c 'cp /mingw64/bin/libgcc_s_seh-1.dll mechosoma/bin/'
         msys2 -c 'cp /mingw64/bin/libstdc++-6.dll mechosoma/bin/'
         msys2 -c 'cp /mingw64/bin/libwinpthread-1.dll mechosoma/bin/'
-        cp build/src/mechosoma.exe mechosoma/bin/
-        cp build/src/mechosoma.exe mechosoma/bin/mechosoma_debug.exe
+        cp MechoSoma/build/src/mechosoma.exe mechosoma/bin/
+        cp MechoSoma/build/src/mechosoma.exe mechosoma/bin/mechosoma_debug.exe
     - uses: actions/upload-artifact@v1
       with:
         name: Mechosoma-Release-64
