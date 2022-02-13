@@ -21,6 +21,7 @@ jobs:
         mingw-w64-x86_64-nasm
         mingw-w64-x86_64-yasm
         mingw-w64-x86_64-make
+        mingw-w64-x86_64-libjpeg-turbo
         unzip'
     - uses: actions/checkout@v1
     - name: mechosoma -- load submodules
