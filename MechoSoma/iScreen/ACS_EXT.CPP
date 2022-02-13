@@ -2827,7 +2827,7 @@ void acsSaveScreenState(XBuffer* xb,aciScreen* scr)
 	ev = (aciScreenEvent*)scr -> events -> fPtr;
 	while(ev){
 		if(ev -> flags & ACS_EVENT_ACTIVE){
-			*xb < (long)ev < ev -> flags < ev -> CurTimer;
+			*xb < (*(long*)ev) < ev -> flags < ev -> CurTimer;
 			cm = (aciScreenEventCommand*)ev -> commSeq -> fPtr;
 			while(cm){
 				*xb < cm -> flags;
@@ -2842,7 +2842,7 @@ void acsSaveScreenState(XBuffer* xb,aciScreen* scr)
 		ev = (aciScreenEvent*)obj -> events -> fPtr;
 		while(ev){
 			if(ev -> flags & ACS_EVENT_ACTIVE){
-				*xb < (long)ev < ev -> flags < ev -> CurTimer;
+				*xb < (*(long*)ev) < ev -> flags < ev -> CurTimer;
 				cm = (aciScreenEventCommand*)ev -> commSeq -> fPtr;
 				while(cm){
 					*xb < cm -> flags;

@@ -5,7 +5,7 @@
 //	Control defines
 //////////////////////////////////////////////
 #ifdef _WIN32
-#define TNT_MEM_HEAP  200000
+// #define TNT_MEM_HEAP  200000
 #define TNT_NO_BOUNDS_CHECK
 #endif
 //#define _LCPSolverListing_

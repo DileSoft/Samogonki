@@ -287,7 +287,7 @@ void scrSetOutputFile(char* p)
 
 scrDataBlock* loadScript(const std::filesystem::path &path)
 {
-	XStream fh(path.c_str(),XS_IN);
+	XStream fh((char *)path.c_str(),XS_IN);
 	return loadScript(fh);
 }
 

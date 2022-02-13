@@ -214,7 +214,7 @@ void acsSaveSlot::save(void)
 	fh < acsSaveVersion;
 	fh.write(playerName,HS_NAME_LEN + 1);
 
-	fh < strlen(timeString) + 1 < timeVal;
+	fh < (unsigned long) strlen(timeString) + 1 < timeVal;
 	fh.write(timeString,strlen(timeString) + 1);
 
 	fh < numStarlets < figureID < lastWorld < lastTrack;
@@ -271,7 +271,7 @@ void acsSaveSlot::pack(void)
 	fh < acsSaveVersion;
 	fh.write(playerName,HS_NAME_LEN + 1);
 
-	fh < strlen(timeString) + 1 < timeVal;
+	fh < (unsigned long) strlen(timeString) + 1 < timeVal;
 	fh.write(timeString,strlen(timeString) + 1);
 
 	fh < numStarlets < figureID < lastWorld < lastTrack;

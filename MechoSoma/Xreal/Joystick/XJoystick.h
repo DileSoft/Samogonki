@@ -2,8 +2,9 @@
 #define _XJOYSTICK_H
 
 #ifndef _WIN32
-#include <cstring>
 #endif
+#include <cstring>
+#include <string>
 
 //---------------------------------------------------------------------------
 
