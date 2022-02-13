@@ -23,6 +23,8 @@ jobs:
         mingw-w64-x86_64-make
         unzip'
     - uses: actions/checkout@v1
+    - name: mechosoma -- load submodules
+      run: git submodule update --init --recursive
     - name: mechosoma -- create build dir
       run: msys2 -c 'mkdir MechoSoma/build'
     - name: mechosoma -- configure
