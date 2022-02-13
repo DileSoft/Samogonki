@@ -1,0 +1,55 @@
+name: Mechosoma Windows 64bit Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+    - name: install libs
+      run: msys2 -c 'pacman --noconfirm -S
+        mingw-w64-x86_64-ninja
+        mingw-w64-x86_64-gcc
+        mingw-w64-x86_64-SDL2
+        mingw-w64-x86_64-SDL2_net
+        mingw-w64-x86_64-cmake
+        mingw-w64-x86_64-libogg
+        mingw-w64-x86_64-libvorbis
+        mingw-w64-x86_64-nasm
+        mingw-w64-x86_64-yasm
+        mingw-w64-x86_64-make
+        unzip'
+    - uses: actions/checkout@v1
+    - name: mechosoma -- create build dir
+      run: msys2 -c 'mkdir build'
+    - name: mechosoma -- configure
+      run: msys2 -c 'cmake -DCMAKE_BUILD_TYPE=Debug -G Ninja ..'
+      working-directory: build
+    - name: mechosoma -- make
+      run: msys2 -c 'ninja'
+      working-directory: build
+    - name: mechosoma -- prepare release folder
+      run: |
+        msys2 -c 'mkdir -p mechosoma/bin'
+        msys2 -c 'cp /mingw64/bin/SDL2.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/SDL2_net.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/avcodec-58.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/avformat-58.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/avutil-56.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libogg-0.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libvorbis-0.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libvorbisfile-3.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/zlib1.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libgcc_s_dw2-1.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libgcc_s_seh-1.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libstdc++-6.dll mechosoma/bin/'
+        msys2 -c 'cp /mingw64/bin/libwinpthread-1.dll mechosoma/bin/'
+        cp build/src/mechosoma.exe mechosoma/bin/
+        cp build/src/mechosoma.exe mechosoma/bin/mechosoma_debug.exe
+    - uses: actions/upload-artifact@v1
+      with:
+        name: Mechosoma-Release-64
+        path: mechosoma
