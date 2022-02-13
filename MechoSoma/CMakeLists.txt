@@ -504,7 +504,7 @@ link_directories(ThirdParty/libjpeg-turbo/lib)
 
 add_definitions(-D_MECHOSOMA_ -D_USE_TILEMAP_ -D_USE_TERRA_ -DNASSERT -D_FINAL_VERSION_ -D_MPPLUS_SOUNDTRACK_)
 
-add_library(${LIBRARY_NAME} ${GAME_SOURCES})
+add_library(${LIBRARY_NAME} STATIC ${GAME_SOURCES})
 target_link_libraries(${LIBRARY_NAME} PUBLIC 3dsftk3 iniparser jpeg)
 
 set_target_properties(
