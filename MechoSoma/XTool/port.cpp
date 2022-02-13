@@ -9,6 +9,7 @@
 #include "filesystem.h"
 #include "xtool.h"
 #include "xINI_File.h"
+#include "windows.h"
 
 char *strupr(char *string) {
       char *s;
@@ -98,10 +99,10 @@ char* port_ultoa( unsigned long value, char* result, int base ) {
 	return result;
 }
 
-char *_fullpath(char *absPath, const char *relPath, size_t maxLength)
-{
-	return realpath(relPath, absPath);
-}
+// char *_fullpath(char *absPath, const char *relPath, size_t maxLength)
+// {
+// 	return realpath(relPath, absPath);
+// }
 
 char *strlwr(char *str)
 {
@@ -169,12 +170,12 @@ uint32_t GetPrivateProfileString(
 	return value_size;
 }
 
-bool WritePrivateProfileString(
-	const char* lpAppName,
-	const char* lpKeyName,
-	const char* lpString,
-	const char* lpFileName
-)
-{
-	return false;
-}
+// bool WritePrivateProfileString(
+// 	const char* lpAppName,
+// 	const char* lpKeyName,
+// 	const char* lpString,
+// 	const char* lpFileName
+// )
+// {
+// 	return false;
+// }

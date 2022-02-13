@@ -87,7 +87,7 @@ int XStream::open(const char* name, unsigned f)
 
 	const auto file_path = file::normalize_path(name);
 
-	std::fstream *file = open_file(file_path.c_str(), f);
+	std::fstream *file = open_file((const char*)(file_path.c_str()), f);
 	handler = file;
 	if (file->is_open()) {
 		fname = name;
