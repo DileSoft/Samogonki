@@ -23,6 +23,5 @@ cmake-build-debug
 cmake-build-release
 
 # Third party
-MechoSoma/ThirdParty/3dsftk3
 MechoSoma/ThirdParty/libjpeg-turbo
 
