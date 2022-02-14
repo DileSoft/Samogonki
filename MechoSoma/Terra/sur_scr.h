@@ -2,6 +2,7 @@
 #define __SUR_SCR_H__
 
 #include <vector>
+#include <cstring>
 #include "xtool.h"
 
 #ifdef _SURMAP_

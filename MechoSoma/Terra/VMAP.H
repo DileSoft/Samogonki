@@ -1,4 +1,9 @@
+#ifndef VMAP_H_
+#define VMAP_H_
+
 #include "xtool.h"
+
+#include <cstdlib>
 
 //const unsigned int H_POWER = H_SIZE_POWER;
 //const unsigned int H_SIZE = 1 << H_POWER;
@@ -52,7 +57,7 @@ struct PrmFile;
 	//#define offsetSpec (XS_Buf * YS_Buf*3)
 #else 
 	#define offsetAt (XS_Buf * YS_Buf*0)
-	#define offsetVx (XS_Buf * YS_Buf/4*1) //Размер VxBuf в мехосоме - 1M
+	#define offsetVx (XS_Buf * YS_Buf/4*1) //пїЅпїЅпїЅпїЅпїЅпїЅ VxBuf пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ - 1M
 	#define offsetClTr (XS_Buf * YS_Buf/4*1 + (XS_Buf * YS_Buf/4) )
 	//#define offsetSpec (XS_Buf * YS_Buf*2 + (XS_Buf * YS_Buf/4) )
 #endif
@@ -272,15 +277,15 @@ inline int getDeltaX(int v0,int v1)
 
 const int MLNAMELEN = 15;
 
-//Работа с INI Файлом
+//пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ INI пїЅпїЅпїЅпїЅпїЅпїЅ
 extern char* GetINIstringV(const char* iniFile,const char* section,const char* key);
 extern void SaveINIstringV(const char* iniFile,const char* section,const char* key,char* var);
 
 
 struct sWorldTable {
-	char* name; //Имя мира
-	char* dir;  //Путь до каталога с миром
-	char* fname;//имя INI файла мира пока с частичным путем
+	char* name; //пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
+	char* dir;  //пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ
+	char* fname;//пїЅпїЅпїЅ INI пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 
 	int numberMechosomWorld;
 	int numberMechosomTrack;
@@ -303,3 +308,5 @@ struct sAllWorldsTable {
 
 };
 //extern sAllWorldTable AllWorldTable;
+
+#endif // VMAP_H_

@@ -2,6 +2,8 @@
 #define __TOOLS_H__
 #include "TERRA.H"
 
+#include <cmath>
+
 extern int MosaicTypes[8];
 
 struct BitMap {

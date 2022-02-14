@@ -1,16 +1,10 @@
-#include "StdAfx.h"
+#include <csetjmp>
+#include <cstdio>
 
-#include <setjmp.h>
-#ifdef _MECHOSOMA_
-#include "mechosoma.h"
-#endif
-
-#include <stdio.h>
-#include "xtool.h"
 #define XMD_H
-extern "C" {
 #include <jpeglib.h>
-}
+
+#include "xtool.h"
 
 
 typedef struct {

@@ -131,6 +131,7 @@ set(GAME_SOURCES
         Terra/LAND.CPP
         Terra/RENDER.H
         Terra/VMAP.CPP
+        Terra/vmap_jpeg.cpp
         Terra/VMAP.H
         Terra/ch_points.cpp
         Terra/ch_points.h

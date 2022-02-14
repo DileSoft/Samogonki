@@ -1,3 +1,6 @@
+#ifndef RENDER_H_
+#define RENDER_H_
+
 #if _MSC_VER == 1100 /* if MSVisual C++ 5.0 */
 #ifndef __forceinline 
 #define __forceinline inline
@@ -162,3 +165,4 @@ void RenderShadovM3D(int number, float y);
 void WorldRender(void);
 void renderHiBmp(void);
 
+#endif // RENDER_H_
