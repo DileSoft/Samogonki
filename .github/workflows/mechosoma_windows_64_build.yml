@@ -36,23 +36,23 @@ jobs:
       working-directory: MechoSoma/build
     - name: mechosoma -- prepare release folder
       run: |
-        msys2 -c 'mkdir -p mechosoma/bin'
-        msys2 -c 'cp /mingw64/bin/SDL2.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/SDL2_net.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/avcodec-58.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/avformat-58.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/avutil-56.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libogg-0.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libvorbis-0.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libvorbisfile-3.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/zlib1.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libgcc_s_dw2-1.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libgcc_s_seh-1.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libstdc++-6.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libwinpthread-1.dll mechosoma/bin/'
-        msys2 -c 'cp /mingw64/bin/libjpeg-8.dll mechosoma/bin/'
-        cp MechoSoma/build/moonshine-runners.exe mechosoma/bin/
-        cp MechoSoma/build/moonshine-runners.exe mechosoma/bin/mechosoma_debug.exe
+        msys2 -c 'mkdir -p mechosoma-build/bin'
+        msys2 -c 'cp /mingw64/bin/SDL2.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/SDL2_net.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/avcodec-58.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/avformat-58.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/avutil-56.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libogg-0.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libvorbis-0.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libvorbisfile-3.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/zlib1.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libgcc_s_dw2-1.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libgcc_s_seh-1.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libstdc++-6.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libwinpthread-1.dll mechosoma-build/bin/'
+        msys2 -c 'cp /mingw64/bin/libjpeg-8.dll mechosoma-build/bin/'
+        cp MechoSoma/build/moonshine-runners.exe mechosoma-build/bin/
+        cp MechoSoma/build/moonshine-runners.exe mechosoma-build/bin/mechosoma_debug.exe
     - uses: actions/upload-artifact@v1
       with:
         name: Mechosoma-Release-64
