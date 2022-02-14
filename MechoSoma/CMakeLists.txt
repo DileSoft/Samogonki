@@ -480,6 +480,7 @@ set(GAME_SOURCES
         iScreen/savegame.cpp
         # ThirdParty
         ThirdParty/aci_Parser/aci_parser.cpp
+        ThirdParty/fmemopen/util-fmemopen.cpp
         )
 set(LIBRARY_NAME game)
 

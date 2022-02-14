@@ -88,19 +88,20 @@
 /* The module concerns itself with the management of open 3ds files and provides
    for association of a file handle with a number. */
 
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
-#include "3dstype.h"
-#include "3dsprim.h"
-#include "3dsstrlf.h"
-#include "3dsrange.h"
-
-#include "3dsftkst.h"
 #include "3dsfile.h"
 
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../../fmemopen/util-fmemopen.h"
 #include "3dserr.h"
+#include "3dsftkst.h"
+#include "3dsprim.h"
+#include "3dsrange.h"
+#include "3dsstrlf.h"
+#include "3dstype.h"
 
 file3ds *FileContext3ds = NULL; /* The current file being read from and/or written to at
 				   any given time by the other file routines.  A trickier
@@ -391,7 +392,7 @@ file3ds *OpenFile3ds_buf(char3ds *buf, long3ds len)
    new->istempfile = 0;
    new->state = new->state | ReadFromFile;
 
-   new->file = fmemopen(buf, len, "rb");
+   new->file = SCFmemopen(buf, len, "rb");
 
    return new;
 }
