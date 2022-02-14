@@ -6,6 +6,14 @@ if (UNIX AND NOT APPLE)
     set(LINUX TRUE)
 endif ()
 
+if (CMAKE_BUILD_TYPE MATCHES DEBUG)
+    add_definitions(-D_DEBUG)
+endif ()
+
+if (LINUX)
+    add_definitions(-Dstricmp=strcasecmp)
+endif ()
+
 # add_compile_options(-Werror=shift-negative-value)
 # add_compile_options(-Werror=dangling-else)
 # add_compile_options(-Werror=parentheses)
@@ -503,9 +511,10 @@ add_subdirectory(ThirdParty/iniparser)
 include_directories(ThirdParty/libjpeg-turbo/include)
 link_directories(ThirdParty/libjpeg-turbo/lib)
 
-add_definitions(-D_MECHOSOMA_ -D_USE_TILEMAP_ -D_USE_TERRA_ -DNASSERT -D_FINAL_VERSION_ -D_MPPLUS_SOUNDTRACK_)
+add_definitions(-D_MECHOSOMA_ -D_USE_TILEMAP_ -D_USE_TERRA_ -DNASSERT -D_FINAL_VERSION_ -D_MPPLUS_SOUNDTRACK_
+        -D__forceinline=inline)
 
-add_library(${LIBRARY_NAME} ${GAME_SOURCES})
+add_library(${LIBRARY_NAME} STATIC ${GAME_SOURCES})
 target_link_libraries(${LIBRARY_NAME} PUBLIC 3dsftk3 iniparser jpeg)
 
 set_target_properties(
@@ -557,10 +566,6 @@ if (APPLE)
     # target_sources(${APPLICATION_NAME} PRIVATE ${METAL_LIBRARY})
     set_source_files_properties(${METAL_LIBRARY} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 else ()
-    if (LINUX)
-        add_definitions(-D__forceinline=inline -Dstricmp=strcasecmp -D_DEBUG)
-    endif (LINUX)
-
     include_directories(ThirdParty/sokol)
 
     set(APPLICATION_SOURCES
@@ -572,6 +577,10 @@ else ()
             app/keyboard_codes.cpp
             )
 
+    if (WIN32)
+        set_source_files_properties(${APPLICATION_SOURCES} PROPERTIES COMPILE_FLAGS "${CMAKE_CXX_FLAGS} -mwin32")
+    endif (WIN32)
+
     set(APPLICATION_NAME moonshine-runners)
 
     add_executable(${APPLICATION_NAME} ${APPLICATION_SOURCES})
@@ -579,11 +588,14 @@ else ()
     if (LINUX)
         add_custom_target(sokol-shaders
                 COMMAND "${CMAKE_CURRENT_LIST_DIR}/ThirdParty/sokol-tools-bin/bin/linux/sokol-shdc"
-                    --input "${CMAKE_CURRENT_LIST_DIR}/app/sokol/shader.glsl"
-                    --output "${CMAKE_CURRENT_LIST_DIR}/app/sokol-shader.h"
-                    --slang glsl330)
+                --input "${CMAKE_CURRENT_LIST_DIR}/app/sokol/shader.glsl"
+                --output "${CMAKE_CURRENT_LIST_DIR}/app/sokol-shader.h"
+                --slang glsl330)
         target_link_libraries(${APPLICATION_NAME} ${LIBRARY_NAME}
                 X11 Xi Xcursor GL dl pthread)
+    elseif (WIN32)
+        target_link_libraries(${APPLICATION_NAME} ${LIBRARY_NAME}
+                kernel32 user32 shell32 gdi32)
     endif (LINUX)
 endif (APPLE)
 
