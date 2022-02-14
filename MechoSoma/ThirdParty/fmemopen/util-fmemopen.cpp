@@ -46,24 +46,24 @@
  * \param mode mode of the file to open
  * \retval pointer to the file; NULL if something is wrong
  */
-FILE *SCFmemopen(void *buf, size_t size, const char *mode) {
-    char temppath[MAX_PATH - 13];
-    if (0 == GetTempPath(sizeof(temppath), temppath))
-        return NULL;
+// FILE *SCFmemopen(void *buf, size_t size, const char *mode) {
+//     char temppath[MAX_PATH - 13];
+//     if (0 == GetTempPath(sizeof(temppath), temppath))
+//         return NULL;
 
-    char filename[MAX_PATH + 1];
-    if (0 == GetTempFileName(temppath, "SC", 0, filename))
-        return NULL;
+//     char filename[MAX_PATH + 1];
+//     if (0 == GetTempFileName(temppath, "SC", 0, filename))
+//         return NULL;
 
-    FILE *f = fopen(filename, "wb");
-    if (NULL == f)
-        return NULL;
+//     FILE *f = fopen(filename, "wb");
+//     if (NULL == f)
+//         return NULL;
 
-    fwrite(buf, size, 1, f);
-    fclose(f);
+//     fwrite(buf, size, 1, f);
+//     fclose(f);
 
-    return fopen(filename, mode);
-}
+//     return fopen(filename, mode);
+// }
 
 #else
 
