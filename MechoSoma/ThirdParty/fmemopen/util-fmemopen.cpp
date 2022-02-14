@@ -37,6 +37,8 @@
 
 #ifdef _WIN32
 
+#include <windows.h>
+
 /**
  * \brief portable version of SCFmemopen for Windows works on top of real temp files
  * \param buffer that holds the file content
