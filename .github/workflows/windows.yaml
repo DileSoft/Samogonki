@@ -2,9 +2,9 @@ name: Windows
 
 on:
   push:
-    branches: [ cmake ]
+    branches: [ cmake, arcade_network ]
   pull_request:
-    branches: [ cmake ]
+    branches: [ cmake, arcade_network ]
 
 jobs:
   build:

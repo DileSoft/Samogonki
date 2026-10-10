@@ -2,9 +2,9 @@ name: Linux
 
 on:
   push:
-    branches: [ cmake ]
+    branches: [ cmake, arcade_network ]
   pull_request:
-    branches: [ cmake ]
+    branches: [ cmake, arcade_network ]
 
 env:
   BUILD_TYPE: RelWithDebInfo
