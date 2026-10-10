@@ -1209,6 +1209,8 @@ void fxlabArcaneSuicideWarrior::Start()
 	Position.z = Position.z + v.z * d + FXLAB_REALOBJECT_OFFSET_Z;
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("Suicide");
+	net_fx_set_pending_link(FXLAB_CLIENT_PROCESS_SUICIDE_LINK);
 	p = Mdisp->createBody("Suicide",Position,Owner->psi() * 180.0f / M_PI);
 	
 	op = dynamic_cast<OwnerProtection*>(p);
@@ -1248,6 +1250,7 @@ void fxlabArcaneClownWarrior::Start()
 	Position.z = Position.z + v.z * d + FXLAB_REALOBJECT_OFFSET_Z;
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("Clown");
 	p = Mdisp->createBody("Clown",Position,Owner->psi() * 180.0f / M_PI);
 	
 	op = dynamic_cast<OwnerProtection*>(p);
@@ -1278,6 +1281,7 @@ void fxlabArcaneEyeWarrior::Start()
 	Position.z = Position.z - v.z * d + FXLAB_REALOBJECT_OFFSET_Z;
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("EvilEye");
 	p = Mdisp->createBody("EvilEye",Position,Owner->psi() * 180.0f / M_PI + 180.0f);
 	
 	op = dynamic_cast<OwnerProtection*>(p);
@@ -1296,6 +1300,7 @@ void fxlabArcaneTomatoWarrior::Start()
 	fxlabGetArcanePosition(Owner,Vect3f(0,Owner->radius()*1.5f,0),Position);
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("Tomato");
 	p = Mdisp->createBody("Tomato",Position,Owner->psi() * 180.0f / M_PI + 180.0f);
 	
 	op = dynamic_cast<OwnerProtection*>(p);
@@ -1362,6 +1367,8 @@ void fxlabArcaneFireBall::InterruptAction()
 	Position.z = Position.z + v.z * d + 12.0f;
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("SmartFireBall");
+	net_fx_set_pending_link(FXLAB_CLIENT_PROCESS_FIRE_BALL_LINK);
 	n = Mdisp->createBody("SmartFireBall",Position,Owner->psi() * 180.0f / M_PI);
 	
 	op = dynamic_cast<OwnerProtection*>(n);
@@ -1410,6 +1417,8 @@ void fxlabArcaneLightningBolt::InterruptAction()
 	Position.z = Position.z + v.z * d + 12.0f;
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("SmartLightningBolt");
+	net_fx_set_pending_link(FXLAB_CLIENT_PROCESS_LIGHTNING_BOLT_LINK);
 	n = Mdisp->createBody("SmartLightningBolt",Position,Owner->psi() * 180.0f / M_PI);
 	
 	op = dynamic_cast<OwnerProtection*>(n);
@@ -1487,11 +1496,13 @@ void fxlabArcaneSpiderSpawn::InterruptAction()
 
 	if(Owner->completed()){		
 		ArcaneStatisticsService::setCurrentArcane(*this);
+		net_fx_set_pending_body("LittleSpider");
 		b = Mdisp->createBody("LittleSpider",Owner->part_coords(M3D_LB_WHEEL) + Vect3f(0,0,FXLAB_REALOBJECT_OFFSET_Z),random(360));
 		op = dynamic_cast<OwnerProtection*>(b);
 		if(op) op->set_owner(ProtectionID,ProtectionTime);
 
 		ArcaneStatisticsService::setCurrentArcane(*this);
+		net_fx_set_pending_body("LittleSpider");
 		b = Mdisp->createBody("LittleSpider",Owner->part_coords(M3D_RB_WHEEL) + Vect3f(0,0,FXLAB_REALOBJECT_OFFSET_Z),random(360));
 		op = dynamic_cast<OwnerProtection*>(b);
 		if(op) op->set_owner(ProtectionID,ProtectionTime);
@@ -2360,6 +2371,7 @@ void fxlabArcaneCrystalSpike::InterruptAction()
 	fxlabGetArcanePosition(Owner,Vect3f(0,Owner->radius()*1.5f,0),Position);
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("Crystal");
 	p = Mdisp -> createBody("Crystal",Position + Vect3f(0,0,FXLAB_REALOBJECT_OFFSET_Z));
 	op = dynamic_cast<OwnerProtection*>(p);
 	if(op) op->set_owner(ProtectionID,ProtectionTime);
@@ -2404,6 +2416,7 @@ void fxlabArcaneBubbleRush::InterruptAction()
 	fxlabGetArcanePosition(Owner,Vect3f(0,Owner->radius()*1.5f,0),Position);
 
 	ArcaneStatisticsService::setCurrentArcane(*this);
+	net_fx_set_pending_body("Bubble");
 	p = Mdisp -> createBody("Bubble",Position + Vect3f(0,0,FXLAB_REALOBJECT_OFFSET_Z));
 	op = dynamic_cast<OwnerProtection*>(p);
 	if(op) op->set_owner(ProtectionID,ProtectionTime);

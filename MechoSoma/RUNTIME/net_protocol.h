@@ -59,10 +59,11 @@ const int NET_FRAG_TIMEOUT_MS		= 2000;
 const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 
 // Version 2 added the arcane mana fields to netRacerState; version 3 added
-// netSpawn::client_link, the visual a client builds next to a replicated body.
-// A peer of another version is refused in the handshake rather than read with
-// the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 3;
+// netSpawn::client_link, the visual a client builds next to a replicated body;
+// version 4 added netSpawn::yaw, the heading the factory-built class B bodies
+// are placed with. A peer of another version is refused in the handshake
+// rather than read with the wrong layout.
+const unsigned int NET_PROTO_VERSION	= 4;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -359,9 +360,18 @@ enum netEntityTypes
 {
 	NET_ENT_NONE = 0,
 
-	// Ballistic, class B: the client recreates the same body from these
-	// initial conditions and lets the shared Body physics carry it. Drift
-	// over a two or three second flight is centimetres and invisible.
+	// Class B: the client recreates the same body from these initial
+	// conditions and lets the shared Body physics carry it. For the ballistic
+	// projectiles drift over a two or three second flight is centimetres and
+	// invisible.
+	//
+	// The bodies from NET_ENT_SMART_FIREBALL down are the arcanes' "smart"
+	// ones - the ones the engine builds by factory name rather than by mesh
+	// (Mdisp->createBody). They steer themselves, so the client's copy can
+	// wander off the host's, and that was a deliberate call: they are short
+	// lived and cheap this way, whereas class C would want a state batch per
+	// body per tick. See net_fx.cpp - the client aims a SmartMissile at the
+	// nearest racer so it at least steers in the same direction.
 	NET_ENT_CANNON_BOMB,
 	NET_ENT_VOLCANIC_BOMB,
 	NET_ENT_FIRE_BOLIDE,
@@ -373,6 +383,13 @@ enum netEntityTypes
 	NET_ENT_TITANIUM_BALL,
 	NET_ENT_CRYSTAL,
 	NET_ENT_BUBBLE,
+	NET_ENT_SMART_FIREBALL,
+	NET_ENT_SMART_LIGHTNINGBOLT,
+	NET_ENT_SUICIDE,
+	NET_ENT_CLOWN,
+	NET_ENT_EVIL_EYE,
+	NET_ENT_TOMATO,
+	NET_ENT_LITTLE_SPIDER,
 
 	// Tracked, class C: these steer themselves toward players whose
 	// position the client only knows approximately, so local simulation
@@ -430,6 +447,12 @@ struct netSpawn
 	// that visual has no way to guess its own type, so the host names it here.
 	// The +1 keeps 0 meaning "no link": FXLAB_CLIENT_PROCESS_TWISTER is 0.
 	unsigned short client_link;
+
+	// Heading, net_q_yaw radians. The factory-built class B bodies are placed
+	// with Mdisp->createBody(name,pose,angle), and the angle is part of what
+	// the body looks and steers like. The mesh-built ones ignore this: their
+	// orientation falls out of the shared physics.
+	unsigned short yaw;
 };
 
 // model_id must be the resolved id, never the noise range: fxlabCreateBolide

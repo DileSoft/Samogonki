@@ -60,6 +60,15 @@ void net_fx_attach(Body* body);
 */
 void net_fx_set_pending_link(int type);
 
+/*
+	Host side: the next body attached is one the engine builds by factory name
+	(Mdisp->createBody) rather than by mesh, and is class B all the same - the
+	client rebuilds it from the name and simulates it. Call it right before the
+	createBody that makes the body; cleared on the next attach. Pass the same
+	name given to createBody.
+*/
+void net_fx_set_pending_body(const char* factory_name);
+
 // A batch arrived. Raw payload including the batch header.
 void net_fx_spawn_recv(const unsigned char* data,unsigned int len);
 void net_fx_despawn_recv(const unsigned char* data,unsigned int len);

@@ -35,10 +35,12 @@
 #include "FlyingObject.h"
 #include "Butterfly.h"
 #include "BonusMan.h"
+#include "SmartMissile.h"
 
 #include "race.h"
 
 #include <cstring>
+#include <cmath>
 
 /*
 	Class B entities. See net_fx.h for why this shape and for what is left out.
@@ -85,9 +87,13 @@ static unsigned int net_fx_actor_ms = 0;
 // The visual the next attached body is born with, or -1. See the header.
 static int net_fx_pending_link = -1;
 
+// The type of the next factory-built body, or 0. See net_fx_set_pending_body.
+static int net_fx_pending_type = 0;
+
 static void net_fx_flush_spawn(void);
 static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link);
 static void net_fx_pending_drain(void);
+static int net_fx_body_type(const char* name);
 
 void net_fx_set_session(netSession* sess)
 {
@@ -97,6 +103,11 @@ void net_fx_set_session(netSession* sess)
 void net_fx_set_pending_link(int type)
 {
 	net_fx_pending_link = type;
+}
+
+void net_fx_set_pending_body(const char* factory_name)
+{
+	net_fx_pending_type = net_fx_body_type(factory_name);
 }
 
 void net_fx_reset(void)
@@ -109,6 +120,7 @@ void net_fx_reset(void)
 	net_fx_actor_pending_count = 0;
 	net_fx_actor_ms = 0;
 	net_fx_pending_link = -1;
+	net_fx_pending_type = 0;
 }
 
 /*
@@ -188,6 +200,52 @@ static const char* net_fx_actor_name(int type,int variant)
 	for(int i = 0; net_fx_actor_defs[i].name; i ++)
 		if(net_fx_actor_defs[i].type == type && net_fx_actor_defs[i].variant == variant)
 			return net_fx_actor_defs[i].name;
+
+	return NULL;
+}
+
+/*
+	The factory-built class B bodies: the arcanes' "smart" ones, which the
+	engine makes by name (Mdisp->createBody) rather than by mesh. One table for
+	both directions - the host looks the type up by the name it is about to
+	build, the client looks the name up by the type on the wire - so the two
+	cannot drift apart.
+*/
+struct netFxBodyDef
+{
+	int type;
+	const char* name;		// BodyDispatcher::createBody factory name
+};
+
+static const netFxBodyDef net_fx_body_defs[] =
+{
+	{ NET_ENT_SMART_FIREBALL,	"SmartFireBall" },
+	{ NET_ENT_SMART_LIGHTNINGBOLT,	"SmartLightningBolt" },
+	{ NET_ENT_SUICIDE,		"Suicide" },
+	{ NET_ENT_CLOWN,		"Clown" },
+	{ NET_ENT_EVIL_EYE,		"EvilEye" },
+	{ NET_ENT_TOMATO,		"Tomato" },
+	{ NET_ENT_CRYSTAL,		"Crystal" },
+	{ NET_ENT_BUBBLE,		"Bubble" },
+	{ NET_ENT_LITTLE_SPIDER,	"LittleSpider" },
+
+	{ 0, NULL }
+};
+
+static int net_fx_body_type(const char* name)
+{
+	for(int i = 0; net_fx_body_defs[i].name; i ++)
+		if(!strcmp(net_fx_body_defs[i].name,name))
+			return net_fx_body_defs[i].type;
+
+	return 0;
+}
+
+static const char* net_fx_body_name(int type)
+{
+	for(int i = 0; net_fx_body_defs[i].name; i ++)
+		if(net_fx_body_defs[i].type == type)
+			return net_fx_body_defs[i].name;
 
 	return NULL;
 }
@@ -498,6 +556,10 @@ static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 	// 0 means none; the type is offset by one because FXLAB_CLIENT_PROCESS_TWISTER
 	// is 0 and would otherwise be indistinguishable from "no link".
 	s -> client_link = (client_link < 0) ? 0 : (unsigned short)(client_link + 1);
+
+	// The heading, for the bodies placed with one rather than left to physics.
+	// The mesh-built ones ignore it.
+	s -> yaw = net_q_yaw(b -> psi());
 }
 
 static void net_fx_flush_despawn(void)
@@ -542,10 +604,13 @@ void net_fx_attach(Body* body)
 {
 	int type,variant;
 
-	// Taken and cleared first, so a link meant for one body can never ride
-	// along with the next one if this body turns out not to be replicated.
+	// Taken and cleared first, so a link or type meant for one body can never
+	// ride along with the next one if this body turns out not to be
+	// replicated.
 	int link = net_fx_pending_link;
 	net_fx_pending_link = -1;
+	int ptype = net_fx_pending_type;
+	net_fx_pending_type = 0;
 
 	// Host only, and only in a net game. Both checks matter: the second keeps
 	// the single player path untouched, and the first is what stops a body the
@@ -557,7 +622,15 @@ void net_fx_attach(Body* body)
 	// Class C is told apart by body->type(), class B by class identity. Both
 	// go through here, and one is a projectile the other is an actor, so the
 	// split has to be made once rather than in two places.
-	type = net_fx_class_of(body,&variant);
+	//
+	// A body the arcane code announced with set_pending_body cannot be told
+	// apart by identity - its class is not "smart" and its mesh says only what
+	// it looks like - so the caller's word is taken over the table.
+	variant = 0;
+	if(ptype)
+		type = ptype;
+	else
+		type = net_fx_class_of(body,&variant);
 	if(!type) return;
 
 	// Nothing to rebuild from. A body with no mesh is not drawable anyway, so
@@ -572,6 +645,23 @@ void net_fx_attach(Body* body)
 }
 
 /* ------------------------------ client side ------------------------------ */
+
+// The visual the host built next to a class B body, if any. Bound to the body
+// so it tracks the same physics and goes away with it.
+static void net_fx_make_link(const netSpawn* s,Body* p,const Vect3f& pos,const Vect3f& vel)
+{
+	if(!s -> client_link) return;
+
+	fxlabGeneralObjectType* ct = fxlabClientD->CreateObject((int)s -> client_link - 1);
+
+	if(ct){
+		ct -> SetStartTime(fxlabClientD->GetTime());
+		ct -> SetPosition(pos);
+		ct -> SetVelocity(vel);
+		ct -> SetBody(p);
+		ct -> Start();
+		}
+}
 
 static void net_fx_create(const netSpawn* s)
 {
@@ -598,9 +688,35 @@ static void net_fx_create(const netSpawn* s)
 	if(is_actor ? !name : !model) return;
 	if(!Mdisp) return;
 
-	// Class B: built by mesh, straight from the host's numbers, and attached
-	// by hand because nothing else in the engine has heard of a network spawn.
+	// Class B: built straight from the host's numbers and attached by hand,
+	// because nothing else in the engine has heard of a network spawn.
 	if(!is_actor){
+		const char* bname = net_fx_body_name(s -> type);
+
+		if(bname){
+			// Factory-built class B: the arcane's "smart" bodies. The class
+			// has no (model,pos,vel,...) constructor, so it is rebuilt the way
+			// the engine builds it, name and heading and all. createBody
+			// attaches it, so there is no attachBody below.
+			float yaw = net_uq_yaw(s -> yaw);
+			p = Mdisp -> createBody(bname,pos,(int)floorf(yaw * 180.0f / (float)M_PI + 0.5f));
+
+			if(!p) return;
+
+			net_fx_register(s -> entity_id,p -> ID,s -> type,s -> variant,0);
+
+			// Homing. The host picks the target inside set_owner, keyed by the
+			// owner's body id, which means nothing here. Point it at the
+			// nearest racer from this machine's view - the two will not agree
+			// exactly, but the missile turns the same way instead of flying
+			// off straight.
+			SmartMissile* sm = dynamic_cast<SmartMissile*>(p);
+			if(sm) sm -> setTarget(Mdisp -> searchBody(p -> R(),Body::MECHOS));
+
+			net_fx_make_link(s,p,pos,vel);
+			return;
+			}
+
 		switch(s -> type){
 			case NET_ENT_CANNON_BOMB:	p = new fxlabCannonBomb(model,pos,vel,damage,-1); break;
 			case NET_ENT_VOLCANIC_BOMB:	p = new fxlabVolcanicBomb(model,pos,vel,damage,-1); break;
@@ -618,20 +734,7 @@ static void net_fx_create(const netSpawn* s)
 		net_fx_register(s -> entity_id,p -> ID,s -> type,s -> variant,0);
 		Mdisp -> attachBody(p);
 
-		// The visual the host built next to this body, if any. Bound to the
-		// body so it tracks the same physics and goes away with it.
-		if(s -> client_link){
-			fxlabGeneralObjectType* ct = fxlabClientD->CreateObject((int)s -> client_link - 1);
-
-			if(ct){
-				ct -> SetStartTime(fxlabClientD->GetTime());
-				ct -> SetPosition(pos);
-				ct -> SetVelocity(vel);
-				ct -> SetBody(p);
-				ct -> Start();
-				}
-			}
-
+		net_fx_make_link(s,p,pos,vel);
 		return;
 		}
 

@@ -794,11 +794,33 @@ FireGarden, FuryFungus). FuryFungus рисует детерминированн�
 * `fxlabBodyInterface.h`: `fxlabCreateBolide` ставит pending-линк перед
   `attachBody`.
 
-Осталось: «умные» тела арканов (`SmartFireBall`, `SmartLightningBolt`,
-`Suicide`, `Crystal`, `Bubble`, `LittleSpider` и т.п.) вообще не входят в
-класс B — их на клиенте нет ни с линком, ни без. Чтобы их показать, надо
-добавить эти классы в `net_fx_type_of`/`net_fx_types`, а линк уедет тем же
-`client_link`.
+Этот же `client_link` несёт привязанный визуал и у «умных» тел — см. ниже.
+
+## Этап 4b+ — «умные» тела арканов как класс B — СДЕЛАНО, НЕ ПРОВЕРЕНО В ЗАЕЗДЕ
+
+Тела `SmartFireBall`, `SmartLightningBolt`, `Suicide`, `Clown`, `EvilEye`,
+`Tomato`, `Crystal`, `Bubble`, `LittleSpider` движок строит не по мешу, а по
+имени (`Mdisp->createBody(name,pos,angle)`); до сих пор на клиенте их не было
+вовсе — ни тела, ни линка. Теперь они класс B.
+
+* Новые значения `netEntityTypes` в блоке класса B (ниже `NET_ENT_BUBBLE`, то
+  есть до `NET_ENT_BONUS_MAN`), поэтому `net_fx_is_actor` их не трогает.
+* `netSpawn::yaw` (`net_q_yaw`, радианы): тело ставится с углом, а угол — часть
+  того, как оно выглядит и рулит. `netSpawn` 25 → 27, `NET_PROTO_VERSION`
+  3 → 4.
+* Таблица `net_fx_body_defs` (тип ↔ имя фабрики) — одна на оба направления.
+* Хост: аркан перед `createBody` зовёт `net_fx_set_pending_body("Имя")`, а где
+  у тела есть привязанный визуал (FireBall, LightningBolt, Suicide) — ещё и
+  `net_fx_set_pending_link`. `net_fx_attach` забирает отложенный тип и шлёт
+  его в спавне.
+* Клиент: `net_fx_create` строит тело через `createBody(name,pos,yaw)`.
+  `SmartMissile` дополнительно наводится на ближайшего гонщика из локальной
+  картины — хост выбирает цель в `set_owner` по ID тела-хозяина, которого у
+  клиента нет.
+
+Сознательная плата: эти тела самонаводятся, и клиентская копия может уехать
+от хостовой. Это принято: тела короткоживущие, а класс C потребовал бы батч
+состояния на каждое тело каждый тик.
 
 ## Этап 5 — режим игры
 
