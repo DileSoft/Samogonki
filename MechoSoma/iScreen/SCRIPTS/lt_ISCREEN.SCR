@@ -210,7 +210,7 @@ screen {
 
 	#define SPLIT_MODE		0
 
-	#define MAIN_MENU_SIZE	7
+	#define MAIN_MENU_SIZE	8
 
 	#define CONTINUE_Y		0
 	#define LOAD_Y			1
@@ -218,13 +218,58 @@ screen {
 	#define DEMO_Y			3
 	#define MULTIPLAYER_Y	4
 	#define OPTIONS_Y		5
-	#define EXIT_Y			6
+	#define WEBSITE_Y		6
+	#define EXIT_Y			7
 
 	#define NG_UP		$ACS_LOAD_OPTION
 	#define EXIT_DOWN	$ACS_CONTINUE_OPTION
 
 	#define ACS_NG_STR	$ACS_ABORT_GAME_STR
 	#include "ISCREEN\Scripts\mainmenu.inc"
+
+	object {
+		ID	$ACS_WEBSITE_OPTION
+		type	$ACS_INPUT_FIELD_OBJ
+
+		$ALPHA_SET0
+
+		flag	0x04
+
+		str_len 25
+		string	$ACS_WEBSITE_STR
+		font	$MAIN_FNT
+		$COLOR_SET0
+
+		obj_index	1 $ACS_OPTIONS_OPTION
+		obj_index	0 0 
+		obj_index	2 0 
+
+		palette $ACS_MAIN_MENU_PAL0
+
+		x	"(640 - $MAIN_MENU_SX) / 2 + $MENU_DX"
+		y	"$MAIN_MENU_START_Y + (480 - ($MAIN_MENU_SY + $MAIN_MENU_DELTA) * $MAIN_MENU_SIZE)/2 + ($MAIN_MENU_SY + $MAIN_MENU_DELTA ) * $WEBSITE_Y"
+
+		size_x	$MAIN_MENU_SX
+		size_y	$MAIN_MENU_SY
+
+		event {
+			code	$VK_MOUSE_LEFT
+			code	$VK_MOUSE_RIGHT
+
+			time	1
+
+			ev_comm {
+				code	$ACS_EXT_EVENT
+				ev_data $ACS_EXT_START_SOUND $EFF_MAIN_MENU_BUTTON 0 0
+				start_time 0
+			}
+			ev_comm {
+				code	$ACS_EXT_EVENT
+				ev_data $ACS_EXT_OPEN_SITE 0 0 0
+				start_time 0
+			}
+		}
+	}
 
 	object {
 		ID	83		// Demo option
@@ -544,20 +589,65 @@ screen {
 
 	#define SPLIT_MODE		0
 
-	#define MAIN_MENU_SIZE	6
+	#define MAIN_MENU_SIZE	7
 
 	#define CONTINUE_Y		0
 	#define NEW_GAME_Y		1
 	#define DEMO_Y			2
 	#define MULTIPLAYER_Y	3
 	#define OPTIONS_Y		4
-	#define EXIT_Y			5
+	#define WEBSITE_Y		5
+	#define EXIT_Y			6
 
 	#define NG_UP		$ACS_CONTINUE_OPTION
 	#define EXIT_DOWN	$ACS_CONTINUE_OPTION
 
 	#define ACS_NG_STR	$ACS_ABORT_GAME_STR
 	#include "ISCREEN\Scripts\mainmenu.inc"
+
+	object {
+		ID	$ACS_WEBSITE_OPTION
+		type	$ACS_INPUT_FIELD_OBJ
+
+		$ALPHA_SET0
+
+		flag	0x04
+
+		str_len 25
+		string	$ACS_WEBSITE_STR
+		font	$MAIN_FNT
+		$COLOR_SET0
+
+		obj_index	1 $ACS_OPTIONS_OPTION
+		obj_index	0 0 
+		obj_index	2 0 
+
+		palette $ACS_MAIN_MENU_PAL0
+
+		x	"(640 - $MAIN_MENU_SX) / 2 + $MENU_DX"
+		y	"$MAIN_MENU_START_Y + (480 - ($MAIN_MENU_SY + $MAIN_MENU_DELTA) * $MAIN_MENU_SIZE)/2 + ($MAIN_MENU_SY + $MAIN_MENU_DELTA ) * $WEBSITE_Y"
+
+		size_x	$MAIN_MENU_SX
+		size_y	$MAIN_MENU_SY
+
+		event {
+			code	$VK_MOUSE_LEFT
+			code	$VK_MOUSE_RIGHT
+
+			time	1
+
+			ev_comm {
+				code	$ACS_EXT_EVENT
+				ev_data $ACS_EXT_START_SOUND $EFF_MAIN_MENU_BUTTON 0 0
+				start_time 0
+			}
+			ev_comm {
+				code	$ACS_EXT_EVENT
+				ev_data $ACS_EXT_OPEN_SITE 0 0 0
+				start_time 0
+			}
+		}
+	}
 
 	object {
 		ID	83		// Demo option
@@ -831,19 +921,64 @@ screen {
 
 	#define SPLIT_MODE		0
 
-	#define MAIN_MENU_SIZE	5
+	#define MAIN_MENU_SIZE	6
 
 	#define NEW_GAME_Y		0
 	#define DEMO_Y			1
 	#define MULTIPLAYER_Y	2
 	#define OPTIONS_Y		3
-	#define EXIT_Y			4
+	#define WEBSITE_Y		4
+	#define EXIT_Y			5
 
 	#define NG_UP		$ACS_EXIT_OPTION
 	#define EXIT_DOWN	$ACS_NEW_GAME_OPTION
 
 	#define ACS_NG_STR	$ACS_NEW_GAME_STR
 	#include "ISCREEN\Scripts\mainmenu.inc"
+
+	object {
+		ID	$ACS_WEBSITE_OPTION
+		type	$ACS_INPUT_FIELD_OBJ
+
+		$ALPHA_SET0
+
+		flag	0x04
+
+		str_len 25
+		string	$ACS_WEBSITE_STR
+		font	$MAIN_FNT
+		$COLOR_SET0
+
+		obj_index	1 $ACS_OPTIONS_OPTION
+		obj_index	0 0 
+		obj_index	2 0 
+
+		palette $ACS_MAIN_MENU_PAL0
+
+		x	"(640 - $MAIN_MENU_SX) / 2 + $MENU_DX"
+		y	"$MAIN_MENU_START_Y + (480 - ($MAIN_MENU_SY + $MAIN_MENU_DELTA) * $MAIN_MENU_SIZE)/2 + ($MAIN_MENU_SY + $MAIN_MENU_DELTA ) * $WEBSITE_Y"
+
+		size_x	$MAIN_MENU_SX
+		size_y	$MAIN_MENU_SY
+
+		event {
+			code	$VK_MOUSE_LEFT
+			code	$VK_MOUSE_RIGHT
+
+			time	1
+
+			ev_comm {
+				code	$ACS_EXT_EVENT
+				ev_data $ACS_EXT_START_SOUND $EFF_MAIN_MENU_BUTTON 0 0
+				start_time 0
+			}
+			ev_comm {
+				code	$ACS_EXT_EVENT
+				ev_data $ACS_EXT_OPEN_SITE 0 0 0
+				start_time 0
+			}
+		}
+	}
 
 	object {
 		ID	83		// Demo option

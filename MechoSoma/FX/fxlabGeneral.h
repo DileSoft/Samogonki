@@ -235,6 +235,7 @@ struct fxlabRndGenerator
 	unsigned fxlabRNDVAL;
 
 	void Open();
+	void Open(unsigned seed);
 
 	unsigned RND(unsigned m)
 	{

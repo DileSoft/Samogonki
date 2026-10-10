@@ -55,11 +55,17 @@ namespace localization {
           "resource/m3d_font_add.scb",
     };
     std::string langDir = "/lang/en/";
+    std::string lang = "en";
 
-    void setLanguage(const char* lang) {
-        if (supportedLanguages.find(lang) != supportedLanguages.end()) {
+    void setLanguage(const char* lang_) {
+        if (supportedLanguages.find(lang_) != supportedLanguages.end()) {
+            lang = lang_;
             langDir = std::string("/lang/") + lang + "/";
         }
+    }
+
+    const char* getLanguage() {
+      return lang.c_str();
     }
 
     std::string getLocalizedFile(const std::string& input) {

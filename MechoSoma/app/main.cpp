@@ -30,6 +30,21 @@
 
 int xtSysQuantDisabled = 0;
 
+// Implemented in RUNTIME/net_selftest.cpp
+int net_selftest(void);
+
+namespace {
+
+    int run_net_selftest() {
+        const int result = net_selftest();
+        if (result) {
+            OutputDebugStringA("moonshine: network transport self test FAILED, see nettest.log\n");
+        }
+        return result;
+    }
+
+}
+
 namespace {
 
     struct LoopState {
@@ -93,6 +108,11 @@ int game_main(int argc, char const *argv[]) {
   localization::setLanguage(gpx()->sys()->getLanguage().c_str());
 #else
 int main(int argc, char const *argv[]) {
+  for (int i = 1; i < argc; ++i) {
+      if (strcmp(argv[i], "-nettest") == 0) {
+          return run_net_selftest();
+      }
+  }
   #ifdef STEAM_VERSION
   if (!SteamAPI_Init()) {
     return 1;

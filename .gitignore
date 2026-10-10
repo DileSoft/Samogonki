@@ -33,3 +33,11 @@ cmake-build-*
 emscripten
 CMakeFiles
 *.d.ts
+
+/bin
+/portable
+
+/build-ucrt
+/build-mingw
+/ffmpeg
+/nettest.log

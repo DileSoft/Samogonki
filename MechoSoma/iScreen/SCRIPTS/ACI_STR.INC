@@ -209,6 +209,7 @@ Samogonki@kdlab.com
 #define	ACS_DEMO_STR	"делн"
 #define	ACS_QUIT_STR	"бшунд"
 #define	ACS_OPTIONS_STR	"ножхх"
+#define	ACS_WEBSITE_STR	"ЯЮИР"
 #define	ACS_CREDITS_STR	"на юбрнпюу"
 #define	ACS_RESTART_STR	"оепегюосярхрэ цнмйс"
 #define	ACS_MULTIPLAYER_STR	"лскэрхокееп"

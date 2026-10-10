@@ -24,6 +24,10 @@
 #include "controls.h"
 #include "XJoystick.h"
 
+#include <SDL2/SDL.h>
+
+#include "filesystem.h"
+
 #include "I-World.h"
 #include "GameClient.h"
 
@@ -356,6 +360,128 @@ char acsJoyUse[3] = { 1, 1, 0};
 
 unsigned iRndVal = 83838383;
 
+static const char* ACS_WEB_SITE_URL = "https://kdlab.com";
+
+// Main menu geometry, mirrors MAIN_MENU_SX/SY/DELTA from ISCREEN.SCR...
+#define ACS_MENU_SCREEN_Y	480
+#define ACS_MENU_ITEM_DY	(35 + 1)
+
+static void acsOpenWebSite(const char* url)
+{
+	SDL_OpenURL(url);
+}
+
+// Menu strings are stored in the codepage of the active language...
+static const char* acsGetWebSiteString(void)
+{
+	if(!strcmp(localization::getLanguage(),"ru"))
+		return "\xF1\xE0\xE9\xF2";	// cp1251 for "SAYT"
+
+	return "WEBSITE";
+}
+
+static int acsGetMenuItemY(int index,int count)
+{
+	return (ACS_MENU_SCREEN_Y - ACS_MENU_ITEM_DY * count)/2 + ACS_MENU_ITEM_DY * index;
+}
+
+static void acsAddEventCommand(aciScreenEvent* ev,int code,int d0,int d1,int d2,int d3,int start_time)
+{
+	aciScreenEventCommand* comm = new aciScreenEventCommand;
+
+	comm -> code = code;
+	comm -> data[0] = d0;
+	comm -> data[1] = d1;
+	comm -> data[2] = d2;
+	comm -> data[3] = d3;
+	comm -> StartTimer = start_time;
+
+	ev -> AddCommand(comm);
+}
+
+// The "Website" option is described in ISCREEN.SCR, but the compiled iscreen.scb
+// only picks it up when the script is rebuilt. Until then the option is created
+// here, reusing the look of the sibling menu items...
+void acsAddWebSiteOption(int scr_id,int item_index,int item_count)
+{
+	aciScreen* scr = acsScrD -> GetScreen(scr_id);
+	aciScreenInputField* proto;
+	aciScreenObject* p;
+	aciScreenInputField* obj;
+	aciScreenEvent* ev;
+	int base,index;
+
+	if(!scr) return;
+
+	// Already there, the script was rebuilt...
+	if(scr -> GetObject(ACS_WEBSITE_OPTION)) return;
+
+	proto = (aciScreenInputField*)scr -> GetObject(ACS_OPTIONS_OPTION);
+	if(!proto) return;
+
+	// One more item moves the whole block up and pushes everything below the
+	// insertion point one slot further down, see acsGetMenuItemY()...
+	base = acsGetMenuItemY(0,item_count);
+
+	for(p = (aciScreenObject*)scr -> objList -> fPtr; p; p = (aciScreenObject*)p -> next){
+		if(p -> PosY == -1) continue;
+
+		index = (p -> PosY - base) / ACS_MENU_ITEM_DY;
+
+		// Not one of the menu items, leave it alone...
+		if(index < 0 || index >= item_count || (p -> PosY - base) % ACS_MENU_ITEM_DY)
+			continue;
+
+		p -> PosY = acsGetMenuItemY(index + (index >= item_index ? 1 : 0),item_count + 1);
+		p -> backup_coords();
+	}
+
+	obj = new aciScreenInputField;
+
+	obj -> ID = ACS_WEBSITE_OPTION;
+	obj -> PalID = proto -> PalID;
+	obj -> fonResID = proto -> fonResID;
+	obj -> SizeX = proto -> SizeX;
+	obj -> SizeY = proto -> SizeY;
+	obj -> PosX = proto -> PosX;
+	obj -> PosY = acsGetMenuItemY(item_index,item_count + 1);
+
+	obj -> MaxStrLen = proto -> MaxStrLen;
+	obj -> font = proto -> font;
+	obj -> Space = proto -> Space;
+	obj -> Color0 = proto -> Color0;
+	obj -> Color1 = proto -> Color1;
+	obj -> Color2 = proto -> Color2;
+	obj -> AlphaCur = obj -> Alpha0 = proto -> Alpha0;
+	obj -> Alpha1 = proto -> Alpha1;
+	obj -> Alpha2 = proto -> Alpha2;
+	obj -> dAlpha = proto -> dAlpha;
+
+	obj -> alloc_str();
+	obj -> set_string((char*)acsGetWebSiteString());
+
+	obj -> flags = proto -> flags;
+
+	obj -> objIndex[0] = 0;
+	obj -> objIndex[1] = ACS_OPTIONS_OPTION;
+	obj -> objIndex[2] = 0;
+	obj -> objIndex[3] = ACS_EXIT_OPTION;
+
+	ev = new aciScreenEvent;
+
+	ev -> AddKey(VK_MOUSE_LBUTTON,0);
+	ev -> AddKey(VK_MOUSE_RBUTTON,0);
+	ev -> MaxTimer = 1;
+
+	acsAddEventCommand(ev,ACS_EXT_EVENT,ACS_EXT_START_SOUND,EFF_MAIN_MENU_BUTTON,0,0,0);
+	acsAddEventCommand(ev,ACS_EXT_EVENT,ACS_EXT_OPEN_SITE,0,0,0,0);
+
+	obj -> AddEvent(ev);
+	obj -> backup_coords();
+
+	scr -> AddObject(obj);
+}
+
 void acsPrepare(void)
 {
 	acsPrepareFlag = 1;
@@ -370,6 +496,10 @@ void acsPrepare(void)
 	acsLoadScript("iscreen.scb");
 
 	acsLoadFonts();
+
+	acsAddWebSiteOption(ACS_MAIN_MENU_SCR0,4,5);
+	acsAddWebSiteOption(ACS_MAIN_MENU_SCR1,5,6);
+	acsAddWebSiteOption(ACS_MAIN_MENU_SCR2,6,7);
 
 	acsScrD -> ChangeCoords((XGR_MAXX - 640)/2,(XGR_MAXY - 480)/2);
 
@@ -779,6 +909,9 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 	mchTrackInfo* p;
 
 	switch(code){
+		case ACS_EXT_OPEN_SITE:
+			acsOpenWebSite(ACS_WEB_SITE_URL);
+			break;
 		case ACS_EXT_CHANGE_PLAYER:
 			mchGameFlags |= MCH_STOP_TIME_FLAG | MCH_TOGGLE_PAUSE_FLAG;
 			mchPBEM_SetFlag(PBEM_CHANGE_PLAYER);

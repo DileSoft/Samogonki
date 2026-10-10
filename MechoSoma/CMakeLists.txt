@@ -90,6 +90,13 @@ set(GAME_SOURCES
     RUNTIME/mch_rto.H
     RUNTIME/mechosoma.cpp
     RUNTIME/mechosoma.h
+    RUNTIME/net_protocol.h
+    RUNTIME/net_protocol_types.h
+    RUNTIME/net_selftest.cpp
+    RUNTIME/net_socket.h
+    RUNTIME/net_socket.cpp
+    RUNTIME/net_transport.h
+    RUNTIME/net_transport.cpp
     RUNTIME/og_buffer.cpp
     RUNTIME/online_game.cpp
     RUNTIME/online_game.h
@@ -515,7 +522,7 @@ find_package(Iconv REQUIRED)
 
 if (WIN32)
     set(BCRYPT_LIBRARY bcrypt)
-    set(WINDOWS_COMMON_LIBRARIES SetupAPI Imm32 Version Winmm Cfgmgr32)
+    set(WINDOWS_COMMON_LIBRARIES SetupAPI Imm32 Version Winmm Cfgmgr32 ws2_32)
 endif(WIN32)
 
 if (STEAM_VERSION)
@@ -542,8 +549,9 @@ if (MINGW)
     add_executable(${APPLICATION_NAME} WIN32 ${GAME_SOURCES})
     target_link_libraries(${APPLICATION_NAME} ${COMMON_APPLICATION_LIBRARIES})
     target_link_options(${APPLICATION_NAME} PRIVATE -static-libgcc -static-libstdc++)
+    get_filename_component(TOOLCHAIN_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
     add_custom_command(TARGET ${APPLICATION_NAME} POST_BUILD
-            COMMAND cp -v /mingw64/bin/libwinpthread-1.dll "${CMAKE_CURRENT_BINARY_DIR}")
+            COMMAND cp -v "${TOOLCHAIN_BIN_DIR}/libwinpthread-1.dll" "${CMAKE_CURRENT_BINARY_DIR}")
 elseif (LINUX)
     add_executable(${APPLICATION_NAME} ${GAME_SOURCES})
     target_link_libraries(${APPLICATION_NAME} ${COMMON_APPLICATION_LIBRARIES}

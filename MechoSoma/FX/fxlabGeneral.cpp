@@ -988,6 +988,15 @@ void fxlabRndGenerator::Open()
 	fxlabRNDVAL = /*clock()*/0x83838383;
 };
 
+// Seeded variant. The host and every client seed fxlabClientRND with the same
+// value taken from MSG_WELCOME, so purely cosmetic effects (dust, particles,
+// trail noise) look identical everywhere without ever needing to match the
+// server's own gameplay RNG.
+void fxlabRndGenerator::Open(unsigned seed)
+{
+	fxlabRNDVAL = seed | 0x83838383;
+};
+
 //---------------------------------------
 
 

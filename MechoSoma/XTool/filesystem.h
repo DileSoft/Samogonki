@@ -8,6 +8,7 @@
 namespace localization
 {
     void setLanguage(const char* lang);
+    const char* getLanguage();
     std::string getLocalizedFile(const std::string& input);
 }
 
