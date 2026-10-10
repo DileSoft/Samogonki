@@ -168,6 +168,16 @@ void mchNetArcaneCast(int ownerID,int part,int event,int arcane_id);
 */
 void mchNetArcaneBroadcast(int ownerID,int arcane_id);
 
+/*
+	Host side: one interrupt of an arcane, at a place. Same rule as the cast,
+	but the position comes along: an interrupt happens after the cast, and an
+	effect placed at the cast point (a storm strike) and one placed at the
+	owner (a dropped seed) cannot be told apart from the owner alone.
+
+	x, y, z are engine world coordinates. No-op off the host.
+*/
+void mchNetArcaneInterrupt(int ownerID,int arcane_id,float x,float y,float z);
+
 // Read only, for the UI. All safe to call with no session running.
 int  mchNetIsActive(void);
 int  mchNetState(void);

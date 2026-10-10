@@ -69,6 +69,15 @@ void fxlabArcaneStatisticInit();
 */
 void fxlabClientArcaneStart(int arcane_id,int owner_id);
 
+/*
+	Client side: one later interrupt of an arcane, at the host's place.
+
+	Sister of fxlabClientArcaneStart: a server arcane's InterruptAction() plays
+	a client visual and runs a game effect at the same time, and only the first
+	belongs here. Covered arcanes are listed in the definition.
+*/
+void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const class Vect3f& pos);
+
 int fxlabLine2SphereDist(const class Vect3f& r1,const class Vect3f& c,float rad);
 
 int fxlabGetWorldReflectionEnable();

@@ -9,6 +9,7 @@
 #include "KEYS.H"
 #include "ctl_point.h"
 #include "race.h"
+#include "mechosoma.h"
 #include "arcane_menu.h"
 #include "sound.h"
 
@@ -476,6 +477,104 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 	}
 }
 
+/*
+	Client-side visual for one later interrupt of an arcane.
+
+	The host's InterruptAction() does two things in one body: it plays the
+	client visual and it runs the game effect - fields, damage sensors, bodies.
+	Only the first belongs on a client, so this mirrors just the fxlabClientD
+	pieces of each InterruptAction() in this file. If one of those changes,
+	change it here too.
+
+	The place comes from the host on the event: a storm strike waits at the
+	cast point, a seed drops at the owner, and neither can be recovered from
+	the owner alone.
+
+	Interrupts whose visible result is a Body are not listed here: those bodies
+	travel as class B (and their link rides netSpawn::client_link), so only the
+	client-only pieces are left to rebuild.
+*/
+void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const Vect3f& Position)
+{
+	mchRacer* n;
+	mchMechosRacer* owner = NULL;
+	fxlabGeneralObjectType* t;
+
+	// A seed reads the owner's radius; the rest only the place. Same lookup as
+	// fxlabClientArcaneStart, and it may come back NULL.
+	if(mch_raceD && mch_raceD->racerLst){
+		n = mch_raceD->racerLst->first();
+		while(n){
+			if(n->ID == owner_id && n->Type == MCH_RACER_TYPE_MECHOS){
+				owner = static_cast<mchMechosRacer*>(n);
+				break;
+			}
+			n = n->next;
+		}
+	}
+
+	switch(arcane_id){
+		//CrystalSpike: the spike is a body and travels as class B; this is its crack.
+		case ARCANE009:
+			fxlabClientArcaneSoundImpulse(Position,EFF_CRYSTALLIZATION);
+			break;
+
+		//Bubbles: the bubble is a body and travels as class B.
+		case ARCANE019:
+			fxlabClientArcaneSoundImpulse(Position,EFF_SOAP_BUBBLE);
+			break;
+
+		//ElectricStorm: each later strike. Mirrors fxlabArcaneElecricStorm::InterruptAction.
+		case ARCANE025:
+			{
+				Vect3f v = Position;
+				v.z -= 150.0f;
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_LIGHTNING_LINE);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetKeyID(FXLAB_ID_KEY_ELECTRIC_STORM_BOW);
+				t->SetPosition(v);
+				t->SetVelocity(Vect3f(0,0,1.0f));
+				t->Start();
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetKeyID(FXLAB_ID_KEY_ELECTRIC_STORM_LIGHT);
+				t->SetPosition(v);
+				t->Start();
+
+				fxlabClientArcaneSoundImpulse(Position,EFF_THUNDERSTORM);
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_FEAR_STREAM);
+				t->SetKeyID(FXLAB_ID_KEY_STORM_SPARK);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetPosition(v);
+				t->SetVelocity(Vect3f(0,0,0));
+				t->Start();
+			}
+			break;
+
+		//ElmLight: a seed drops. Mirrors fxlabArcaneLightningSeed::InterruptAction.
+		case ARCANE029:
+			if(!owner) return;
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_LIGHTNING_SEED);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_LIGHTNING_SEEDS);
+			t->SetPosition(Position + Vect3f(0,0,owner->radius() * 0.33f));
+			t->Start();
+			break;
+
+		//Mines: the mortar is a body and travels as class B.
+		case ARCANE061:
+			fxlabClientArcaneSoundImpulse(Position,EFF_MINES);
+			break;
+
+		default:
+			break;
+	}
+}
+
 void fxlabGeneralArcaneType::Open()
 {
 	fxlabServerSpaceType::Open();
@@ -579,6 +678,12 @@ void fxlabGeneralArcaneType::InterruptUse()
 	InterruptTime += 1.0f;
 	while(InterruptTime >= InterruptBorder){
 		InterruptAction();
+
+		// Host side, no-op elsewhere. Told after the action so Position holds
+		// whatever place the action just used; a client rebuilds only the
+		// look, never the server objects the action also made.
+		mchNetArcaneInterrupt(RacerID,ArcaneID,Position.x,Position.y,Position.z);
+
 		InterruptTime -= InterruptBorder;
 	};
 };
@@ -2481,6 +2586,7 @@ void fxlabArcaneMortarMine::InterruptAction()
 	p = new fxlabSleepyMortar(M3D_MORTAR,Position,Vect3f(10.0f - fxlabServerRND.UnitRND() * 20.0f,10.0f - fxlabServerRND.UnitRND() * 20.0f,30.0f),33.3f,-1);
 	op = dynamic_cast<OwnerProtection*>(p);
 	if(op) op->set_owner(ProtectionID,ProtectionTime);
+	net_fx_set_pending_link(FXLAB_CLIENT_PROCESS_MORTAR_BODY_LINK);
 	Mdisp -> attachBody(p);
 
 	MortarPoint.push_back(p);

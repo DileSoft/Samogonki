@@ -61,9 +61,10 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // Version 2 added the arcane mana fields to netRacerState; version 3 added
 // netSpawn::client_link, the visual a client builds next to a replicated body;
 // version 4 added netSpawn::yaw, the heading the factory-built class B bodies
-// are placed with. A peer of another version is refused in the handshake
-// rather than read with the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 4;
+// are placed with; version 5 added netEvent::pos_z, so an arcane interrupt
+// carries the place its effect sits. A peer of another version is refused in
+// the handshake rather than read with the wrong layout.
+const unsigned int NET_PROTO_VERSION	= 5;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -310,6 +311,7 @@ struct netSnapshotHeader
 enum netEventTypes
 {
 	NET_EV_ARCANE_CAST = 1,
+	NET_EV_ARCANE_INTERRUPT,
 	NET_EV_RACER_DESTROYED,
 	NET_EV_RACER_RESPAWN,
 	NET_EV_RACER_FINISHED,
@@ -327,6 +329,7 @@ struct netEvent
 	unsigned char slot;
 	signed short pos_x;
 	signed short pos_y;
+	signed short pos_z;			// a place: an interrupt's effect sits here
 	unsigned char part;			// part index, only meaningful for an arcane
 	unsigned char arcane_id;
 	unsigned char target_id;

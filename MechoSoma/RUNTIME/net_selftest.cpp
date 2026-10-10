@@ -1142,7 +1142,7 @@ static int net_test_event(FILE* f)
 {
 	int ok = 1;
 
-	if(sizeof(netEvent) != 14 || sizeof(netEventHeader) != 5){
+	if(sizeof(netEvent) != 16 || sizeof(netEventHeader) != 5){
 		net_logf(f,"FAIL sizeof event %u/%u, expected 14/5",
 			(unsigned)sizeof(netEvent),(unsigned)sizeof(netEventHeader));
 		ok = 0;
@@ -1163,6 +1163,9 @@ static int net_test_event(FILE* f)
 			sent[i].slot = (unsigned char)i;
 			sent[i].part = (unsigned char)(i * 3);
 			sent[i].arcane_id = (unsigned char)(40 + i);
+			sent[i].pos_x = (signed short)(100 + i * 5);
+			sent[i].pos_y = (signed short)(200 - i * 5);
+			sent[i].pos_z = (signed short)(300 + i * 7);
 			}
 
 		bytes = net_event_pack(payload,sizeof(payload),4242,sent,NET_MAX_EVENT_PER_PACKET);

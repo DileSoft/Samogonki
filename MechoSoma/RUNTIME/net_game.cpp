@@ -600,6 +600,45 @@ void mchNetArcaneBroadcast(int ownerID,int arcane_id)
 }
 
 /*
+	Host side: one interrupt of an arcane that already has its cast visual on
+	the wire. See the header. The place travels because a storm strike sits at
+	the cast point while a dropped seed sits at the owner, and the client
+	cannot tell those apart from the owner alone.
+*/
+void mchNetArcaneInterrupt(int ownerID,int arcane_id,float x,float y,float z)
+{
+	netEvent* e;
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != ownerID){
+		rp = rp -> next;
+		slot ++;
+	}
+
+	if(!rp) return;
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = NET_EV_ARCANE_INTERRUPT;
+	e -> slot = (unsigned char)slot;
+	e -> arcane_id = (unsigned char)arcane_id;
+	e -> pos_x = net_q_spawn_pos(x);
+	e -> pos_y = net_q_spawn_pos(y);
+	e -> pos_z = net_q_spawn_pos(z);
+}
+
+/*
 	Client side: an arcane somebody else cast. Build only its visual.
 
 	The sender is skipped: it already built its own visual the moment it
@@ -611,9 +650,8 @@ static void net_apply_visual_event(const netEvent* e)
 	mchRacer* rp;
 	int slot = 0;
 
-	if(e -> type != NET_EV_ARCANE_CAST) return;
+	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT) return;
 	if(e -> slot >= NET_MAX_PLAYERS) return;
-	if(e -> slot == net_match_S -> local_slot()) return;
 
 	rp = mch_raceD -> racerLst -> first();
 
@@ -623,6 +661,24 @@ static void net_apply_visual_event(const netEvent* e)
 	}
 
 	if(!rp || rp -> Type != MCH_RACER_TYPE_MECHOS) return;
+
+	if(e -> type == NET_EV_ARCANE_INTERRUPT){
+		/*
+			The caster did not build this one. Interrupts run only on the host,
+			so unlike a cast there is nothing local to skip here - the casting
+			client is waiting for exactly this to see its own storm strike.
+			The place rides on the event.
+		*/
+		fxlabClientArcaneInterrupt(e -> arcane_id,rp -> ID,
+					   Vect3f(net_uq_spawn_pos(e -> pos_x),
+						  net_uq_spawn_pos(e -> pos_y),
+						  net_uq_spawn_pos(e -> pos_z)));
+		return;
+		}
+
+	// A cast. The sender built its own visual the moment it cast, before the
+	// event even left, so it is skipped.
+	if(e -> slot == net_match_S -> local_slot()) return;
 
 	fxlabClientArcaneStart(e -> arcane_id,rp -> ID);
 }
