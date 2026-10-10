@@ -52,6 +52,14 @@ void net_fx_reset(void);
 // queued as a spawn of its own.
 void net_fx_attach(Body* body);
 
+/*
+	Host side: the next body attached is born with this client-side visual, an
+	FXLAB_CLIENT_PROCESS_* type, or -1 for none. The engine builds some bodies
+	and their visual together (fxlabCreateBolide); the body travels by mesh and
+	the visual is rebuilt next to it on the client. Cleared on the next attach.
+*/
+void net_fx_set_pending_link(int type);
+
 // A batch arrived. Raw payload including the batch header.
 void net_fx_spawn_recv(const unsigned char* data,unsigned int len);
 void net_fx_despawn_recv(const unsigned char* data,unsigned int len);

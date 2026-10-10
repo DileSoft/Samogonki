@@ -82,13 +82,21 @@ static netActorState net_fx_actor_pending[NET_MAX_ACTORS_PER_PACKET];
 static int net_fx_actor_pending_count = 0;
 static unsigned int net_fx_actor_ms = 0;
 
+// The visual the next attached body is born with, or -1. See the header.
+static int net_fx_pending_link = -1;
+
 static void net_fx_flush_spawn(void);
-static void net_fx_queue_spawn(const netFxEntry* e,Body* b);
+static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link);
 static void net_fx_pending_drain(void);
 
 void net_fx_set_session(netSession* sess)
 {
 	net_fx_sess = sess;
+}
+
+void net_fx_set_pending_link(int type)
+{
+	net_fx_pending_link = type;
 }
 
 void net_fx_reset(void)
@@ -100,6 +108,7 @@ void net_fx_reset(void)
 	net_fx_actor_q_count = 0;
 	net_fx_actor_pending_count = 0;
 	net_fx_actor_ms = 0;
+	net_fx_pending_link = -1;
 }
 
 /*
@@ -401,7 +410,7 @@ static void net_fx_update_actors(void)
 		if(d2 > (float)NET_ACTOR_SPAWN_RADIUS * (float)NET_ACTOR_SPAWN_RADIUS) continue;
 
 		if(!e -> spawn_sent){
-			net_fx_queue_spawn(e,b);
+			net_fx_queue_spawn(e,b,-1);
 			e -> spawn_sent = 1;
 			}
 
@@ -438,7 +447,7 @@ static void net_fx_flush_spawn(void)
 	net_fx_spawn_q_count = 0;
 }
 
-static void net_fx_queue_spawn(const netFxEntry* e,Body* b)
+static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 {
 	netSpawn* s;
 
@@ -485,6 +494,10 @@ static void net_fx_queue_spawn(const netFxEntry* e,Body* b)
 
 	s -> damage = (unsigned char)b -> Energy();
 	s -> flags = 0;
+
+	// 0 means none; the type is offset by one because FXLAB_CLIENT_PROCESS_TWISTER
+	// is 0 and would otherwise be indistinguishable from "no link".
+	s -> client_link = (client_link < 0) ? 0 : (unsigned short)(client_link + 1);
 }
 
 static void net_fx_flush_despawn(void)
@@ -529,6 +542,11 @@ void net_fx_attach(Body* body)
 {
 	int type,variant;
 
+	// Taken and cleared first, so a link meant for one body can never ride
+	// along with the next one if this body turns out not to be replicated.
+	int link = net_fx_pending_link;
+	net_fx_pending_link = -1;
+
 	// Host only, and only in a net game. Both checks matter: the second keeps
 	// the single player path untouched, and the first is what stops a body the
 	// client itself built from a spawn from being queued as a spawn again.
@@ -550,7 +568,7 @@ void net_fx_attach(Body* body)
 			    (unsigned char)net_fx_is_actor(type)))
 		return;
 
-	net_fx_queue_spawn(&net_fx_table[net_fx_count - 1],body);
+	net_fx_queue_spawn(&net_fx_table[net_fx_count - 1],body,link);
 }
 
 /* ------------------------------ client side ------------------------------ */
@@ -599,6 +617,21 @@ static void net_fx_create(const netSpawn* s)
 
 		net_fx_register(s -> entity_id,p -> ID,s -> type,s -> variant,0);
 		Mdisp -> attachBody(p);
+
+		// The visual the host built next to this body, if any. Bound to the
+		// body so it tracks the same physics and goes away with it.
+		if(s -> client_link){
+			fxlabGeneralObjectType* ct = fxlabClientD->CreateObject((int)s -> client_link - 1);
+
+			if(ct){
+				ct -> SetStartTime(fxlabClientD->GetTime());
+				ct -> SetPosition(pos);
+				ct -> SetVelocity(vel);
+				ct -> SetBody(p);
+				ct -> Start();
+				}
+			}
+
 		return;
 		}
 

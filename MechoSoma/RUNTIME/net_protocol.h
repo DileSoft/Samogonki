@@ -58,11 +58,11 @@ const int NET_FRAG_TIMEOUT_MS		= 2000;
 
 const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 
-// Version 2 added the arcane mana fields to netRacerState: the host is the
-// only machine that drains an arcane's Power, so a client that wants a
-// truthful bar has to be told. A version 1 peer is refused in the handshake
-// rather than read with the old layout.
-const unsigned int NET_PROTO_VERSION	= 2;
+// Version 2 added the arcane mana fields to netRacerState; version 3 added
+// netSpawn::client_link, the visual a client builds next to a replicated body.
+// A peer of another version is refused in the handshake rather than read with
+// the wrong layout.
+const unsigned int NET_PROTO_VERSION	= 3;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -423,6 +423,13 @@ struct netSpawn
 	unsigned short lifetime_ms;
 	unsigned char damage;
 	unsigned char flags;
+
+	// FXLAB_CLIENT_PROCESS_* + 1, or 0 for none. Some bodies are born with a
+	// client-side visual bound to them - a trail, a glow - created next to the
+	// body by the code that made it. The body is replicated by its mesh, but
+	// that visual has no way to guess its own type, so the host names it here.
+	// The +1 keeps 0 meaning "no link": FXLAB_CLIENT_PROCESS_TWISTER is 0.
+	unsigned short client_link;
 };
 
 // model_id must be the resolved id, never the noise range: fxlabCreateBolide

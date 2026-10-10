@@ -13,6 +13,8 @@
 
 #include "Meteorite.h"
 
+#include "net_fx.h"
+
 template<class ObjectType>
 void fxlabCreateBolide(int model,int noise,const Vect3f& pos,const Vect3f& vel,float damage,int client_key_type,ArcaneStatisticsInfo* stat,fxlabProtectionType* protect,ObjectType* stuff)
 {
@@ -26,6 +28,9 @@ void fxlabCreateBolide(int model,int noise,const Vect3f& pos,const Vect3f& vel,f
 		op = dynamic_cast<OwnerProtection*>(p);
 		if(op) op->set_owner(protect->ProtectionID,protect->ProtectionTime);
 	};
+	// Tell the net layer which visual this body is born with before it is
+	// attached: net_fx_attach runs from attachBody and carries it to a client.
+	net_fx_set_pending_link(client_key_type);
 	Mdisp -> attachBody(p);
 
 	if(client_key_type >= 0){
