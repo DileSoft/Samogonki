@@ -54,6 +54,21 @@ void fxlabArcaneStop(const class ArcaneStatisticsInfo* p);
 void fxlabArcaneAction(const class ArcaneStatisticsInfo* p,int id);
 void fxlabArcaneStatisticInit();
 
+/*
+	Client-side visual for an arcane, without the game part.
+
+	A client never runs the arcane process - mchArcaneData::fxlabStart() returns
+	at the net hook - so the host is the only machine that builds the server
+	side. But the look of an arcane is not on the server side: every visible
+	piece is a fxlabClientD object created from a server class. This rebuilds
+	just those pieces. It never creates a field, a damage sensor, a feature or
+	touches LinkPoint->Status, so it cannot affect the race.
+
+	Covered arcanes are listed in the definition; the rest cast on the host and
+	stay invisible on a client for now.
+*/
+void fxlabClientArcaneStart(int arcane_id,int owner_id);
+
 int fxlabLine2SphereDist(const class Vect3f& r1,const class Vect3f& c,float rad);
 
 int fxlabGetWorldReflectionEnable();

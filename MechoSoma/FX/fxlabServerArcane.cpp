@@ -38,6 +38,121 @@ void fxlabGetArcanePosition(Mechos* owner,const Vect3f& offset,Vect3f& pos);
 
 extern int mchCurrentWorld;
 
+/*
+	Client-side visual for an arcane, without the game part.
+
+	Mirrors only the fxlabClientD pieces of the matching Start() below - the
+	server objects (fields, damage sensors, features) are deliberately absent,
+	because the host owns those and a client rebuilding them would apply forces
+	and damage a second time.
+
+	Positions and keys are copied from the matching Start() in this file so the
+	client look matches the host's. If a Start() changes, change it here too.
+
+	Covered so far: ARCANE004 RageSlime, ARCANE034 KineticHit, ARCANE048
+	ShiftTrap. Anything else is invisible on a client.
+*/
+void fxlabClientArcaneStart(int arcane_id,int owner_id)
+{
+	mchRacer* n;
+	mchMechosRacer* owner = NULL;
+	fxlabGeneralObjectType* t;
+	Vect3f Position;
+
+	if(!mch_raceD || !mch_raceD->racerLst) return;
+
+	n = mch_raceD->racerLst->first();
+	while(n){
+		if(n->ID == owner_id && n->Type == MCH_RACER_TYPE_MECHOS){
+			owner = static_cast<mchMechosRacer*>(n);
+			break;
+		}
+		n = n->next;
+	}
+
+	if(!owner) return;
+
+	switch(arcane_id){
+		//RageSlime
+		case ARCANE004:
+			Position = owner->R();
+			Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),owner->R().z + owner->radius());
+			fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SLIME_MODEL);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_RAGE_SLIME_MODEL);
+			t->SetPosition(Position);
+			t->SetMatrix(getPlacementPose(Position));
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_LONG);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetSoundID(EFF_SLIME_FURY);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_IMPULSE);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetSoundID(EFF_SLIME_FURY_ADD);
+			t->SetPosition(Position);
+			t->Start();
+			break;
+
+		//KineticHit
+		case ARCANE034:
+			Position = owner->R();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_MODEL);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_KINETIC_HIT_WAVE);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_TERRAIN_DEFORMATOR);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_KINETIC_HIT_DEFORMATION);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_IMPULSE);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetSoundID(EFF_KINETIC_HIT);
+			t->SetPosition(Position);
+			t->Start();
+			break;
+
+		//ShiftTrap
+		case ARCANE048:
+			Position = owner->R();
+			Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),owner->R().z + owner->radius());
+			fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_GROUND_MODEL);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_SHIFT_TRAP_MODEL);
+			t->SetPosition(Position);
+
+			{
+				MatXf pose = getPlacementPose(Position);
+				t->SetMatrix(pose);
+				Position = pose.trans();
+			}
+
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_LONG);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetSoundID(EFF_TELEPORT);
+			t->SetPosition(Position);
+			t->Start();
+			break;
+
+		default:
+			break;
+	}
+}
+
 void fxlabGeneralArcaneType::Open()
 {
 	fxlabServerSpaceType::Open();

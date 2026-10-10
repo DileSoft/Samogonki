@@ -14,6 +14,7 @@
 #include "race.h"
 #include "Mechos.h"
 #include "fxlabGeneral.h"
+#include "fxlabInterface.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -396,6 +397,74 @@ static void net_flush_events(void)
 	net_event_q_count = 0;
 }
 
+/*
+	Host side: queue a visual broadcast for an arcane that just started here.
+
+	Called from mchArcaneData::fxlabStart() on the host, so it covers both the
+	host's own cast and a client cast the host has just replayed. Only the
+	look travels - the client that receives it builds client FX objects and
+	nothing else (fxlabClientArcaneStart).
+*/
+void mchNetArcaneBroadcast(int ownerID,int arcane_id)
+{
+	netEvent* e;
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
+
+	// The client resolves the racer by slot, the same order net_apply_event
+	// and net_apply_host_inputs use.
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != ownerID){
+		rp = rp -> next;
+		slot ++;
+	}
+
+	if(!rp) return;
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = NET_EV_ARCANE_CAST;
+	e -> slot = (unsigned char)slot;
+	e -> arcane_id = (unsigned char)arcane_id;
+}
+
+/*
+	Client side: an arcane somebody else cast. Build only its visual.
+
+	The sender is skipped: it already built its own visual the moment it
+	cast, before the event even left (see the client branch of
+	mchArcaneData::fxlabStart()).
+*/
+static void net_apply_visual_event(const netEvent* e)
+{
+	mchRacer* rp;
+	int slot = 0;
+
+	if(e -> type != NET_EV_ARCANE_CAST) return;
+	if(e -> slot >= NET_MAX_PLAYERS) return;
+	if(e -> slot == net_match_S -> local_slot()) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && slot < e -> slot){
+		rp = rp -> next;
+		slot ++;
+	}
+
+	if(!rp || rp -> Type != MCH_RACER_TYPE_MECHOS) return;
+
+	fxlabClientArcaneStart(e -> arcane_id,rp -> ID);
+}
+
 static void net_seed_cosmetic_rng(void)
 {
 	netWelcome w;
@@ -437,20 +506,26 @@ static void net_game_handler(int type,const void* data,unsigned int len,void* pl
 			net_fx_actor_recv((const unsigned char*)data,len);
 			return;
 
-		// Events. The host is the only side that receives them, and it replays
-		// each one against the racer the sender named.
+		// Events travel both ways now: a client sends its casts to the host,
+		// and the host sends visuals to the clients.
 		case NET_MSG_EVENT:
-			if(mchNetHost){
-				int count;
-				netEventHeader hdr;
-				netEvent batch[NET_MAX_EVENT_PER_PACKET];
+			{
+			int count;
+			netEventHeader hdr;
+			netEvent batch[NET_MAX_EVENT_PER_PACKET];
 
-				count = net_event_unpack(&hdr,batch,NET_MAX_EVENT_PER_PACKET,
-							 (const unsigned char*)data,len);
+			count = net_event_unpack(&hdr,batch,NET_MAX_EVENT_PER_PACKET,
+						 (const unsigned char*)data,len);
 
-				for(int i = 0; i < count; i ++)
+			// A client's events are casts it wants the host to run; a host's
+			// are visuals it wants clients to draw.
+			for(int i = 0; i < count; i ++){
+				if(mchNetHost)
 					net_apply_event(&batch[i]);
+				else
+					net_apply_visual_event(&batch[i]);
 				}
+			}
 			return;
 		}
 
@@ -701,12 +776,10 @@ void mchNetQuant(void)
 	net_fx_quant();
 
 	// Events go out on the same tick as the input, so that a spell and the
-	// steering that went with it are one story. Queued by mchNetArcaneCast,
-	// which runs from the arcane machinery itself.
-	if(!mchNetHost)
-		net_flush_events();
-	else
-		net_event_q_count = 0;
+	// steering that went with it are one story. A client queues them in
+	// mchNetArcaneCast; a host queues visual broadcasts in
+	// mchNetArcaneBroadcast. Both flush here, on whichever side this is.
+	net_flush_events();
 
 	/*
 		The registry is the one part of the stack that has never once run, so

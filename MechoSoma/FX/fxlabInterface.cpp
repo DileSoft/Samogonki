@@ -1739,9 +1739,18 @@ void mchArcaneData::fxlabStart()
 		visible everywhere.
 	*/
 	if(mchNetGame && !mchNetHost){
+		// The host owns the effect, this machine owns only the look: build the
+		// visual pieces here and send the cast on. Before this the client saw
+		// nothing at all, not even its own spells.
+		fxlabClientArcaneStart(ID,ownerID);
 		mchNetArcaneCast(ownerID,mchArcanePartOf(this),NET_EV_ARCANE_CAST,ID);
 		return;
 		}
+
+	// Host. The spell runs here for real below; tell the clients to draw it.
+	// A client never reaches this line, so the visual is never doubled on the
+	// machine that cast it.
+	mchNetArcaneBroadcast(ownerID,ID);
 
 	mchRacer* n;
 	mchMechosRacer* p;

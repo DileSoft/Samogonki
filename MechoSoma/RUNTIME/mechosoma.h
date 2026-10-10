@@ -159,6 +159,15 @@ void mchNetQuant(void);
 */
 void mchNetArcaneCast(int ownerID,int part,int event,int arcane_id);
 
+/*
+	Host side: tell every client to build the visual for an arcane, so a spell
+	cast by one player is seen by the others. Called from
+	mchArcaneData::fxlabStart() on the host, which covers both its own player
+	and a client's replayed cast. The sender itself is skipped on arrival,
+	because it already built its own visual locally.
+*/
+void mchNetArcaneBroadcast(int ownerID,int arcane_id);
+
 // Read only, for the UI. All safe to call with no session running.
 int  mchNetIsActive(void);
 int  mchNetState(void);
