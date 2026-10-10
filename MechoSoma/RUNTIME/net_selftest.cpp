@@ -8,6 +8,7 @@
 #include "net_match.h"
 #include "net_snapshot.h"
 #include "net_spawn.h"
+#include "net_actor.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -769,8 +770,8 @@ static int net_test_spawn(FILE* f)
 
 	// Wire sizes. Packed, or the memcpy would ship padding and two builds of
 	// the same code would disagree on how long a spawn is.
-	if(sizeof(netSpawn) != 22 || sizeof(netSpawnHeader) != 5){
-		net_logf(f,"FAIL sizeof spawn %u/%u, expected 22/5",
+	if(sizeof(netSpawn) != 23 || sizeof(netSpawnHeader) != 5){
+		net_logf(f,"FAIL sizeof spawn %u/%u, expected 23/5",
 			(unsigned)sizeof(netSpawn),(unsigned)sizeof(netSpawnHeader));
 		ok = 0;
 		}
@@ -860,6 +861,9 @@ static int net_test_spawn(FILE* f)
 
 			sent[i].entity_id = (unsigned short)(i + 1);
 			sent[i].type = (unsigned char)(NET_ENT_CANNON_BOMB + i);
+			// variant is what tells a BonusMan2 from a BonusMan1 on a type
+			// that has four subclasses, and 0 for every type that has one.
+			sent[i].variant = (unsigned char)(0 == i % 2 ? 0 : i % 5);
 			sent[i].owner_slot = 255;
 			sent[i].pos_x = net_q_spawn_pos(100.0f + 13.0f * (float)i);
 			sent[i].pos_y = net_q_spawn_pos(-250.0f + 7.0f * (float)i);
@@ -979,6 +983,111 @@ static int net_test_spawn(FILE* f)
 	return ok;
 }
 
+/*
+	Actor state codec test.
+
+	A tracked actor's pose is pushed rather than derived, so what is being
+	pinned down is that the pose survives the round trip and that a batch
+	claiming more actors than it holds is refused. The yaw is the one field
+	worth checking by hand rather than by memcmp: a modular heading is the
+	whole reason an actor interpolated between two of these does not take
+	the long way round the circle, and the value is stored as a modulo
+	already.
+*/
+static int net_test_actor(FILE* f)
+{
+	int ok = 1;
+
+	if(sizeof(netActorState) != 17 || sizeof(netActorHeader) != 5){
+		net_logf(f,"FAIL sizeof actor %u/%u, expected 17/5",
+			(unsigned)sizeof(netActorState),(unsigned)sizeof(netActorHeader));
+		ok = 0;
+		}
+
+	// Pack and unpack a full batch, values intact.
+	{
+		netActorState sent[NET_MAX_ACTORS_PER_PACKET];
+		netActorState got[NET_MAX_ACTORS_PER_PACKET];
+		netActorHeader hdr;
+		unsigned char payload[NET_MAX_PAYLOAD];
+		int bytes,count;
+
+		for(int i = 0; i < NET_MAX_ACTORS_PER_PACKET; i ++){
+			memset(&sent[i],0,sizeof(netActorState));
+
+			sent[i].entity_id = (unsigned short)(7000 + i);
+			sent[i].type = (unsigned char)(NET_ENT_BONUS_MAN + i);
+			sent[i].pos_x = net_q_actor_pos(400.0f + 6.0f * (float)i);
+			sent[i].pos_y = net_q_actor_pos(-100.0f - 3.0f * (float)i);
+			sent[i].pos_z = net_q_actor_pos(20.0f * (float)i);
+			sent[i].yaw = net_q_yaw(0.5f + 0.4f * (float)i);
+			sent[i].vel_x = net_q_signed_speed(10.0f * (float)i);
+			sent[i].vel_y = net_q_signed_speed(-5.0f * (float)i);
+			sent[i].flags = 0;
+			sent[i].life_permille = 0;
+			}
+
+		bytes = net_actor_pack(payload,sizeof(payload),555,sent,NET_MAX_ACTORS_PER_PACKET);
+		count = net_actor_unpack(&hdr,got,NET_MAX_ACTORS_PER_PACKET,payload,bytes);
+
+		if(bytes != (int)sizeof(netActorHeader)
+			   + NET_MAX_ACTORS_PER_PACKET * (int)sizeof(netActorState) ||
+		   count != NET_MAX_ACTORS_PER_PACKET || hdr.server_tick != 555){
+			net_logf(f,"FAIL actor batch: %d bytes, %d of %d actors, tick %u",
+				bytes,count,NET_MAX_ACTORS_PER_PACKET,(unsigned)hdr.server_tick);
+			ok = 0;
+			}
+		else {
+			for(int i = 0; i < NET_MAX_ACTORS_PER_PACKET; i ++)
+				if(memcmp(&sent[i],&got[i],sizeof(netActorState))){
+					net_logf(f,"FAIL actor %d differs after round trip",i);
+					ok = 0;
+					}
+			}
+		}
+
+	// A payload claiming more actors than it holds must be refused, and so
+	// must one that is a single byte short.
+	{
+		unsigned char forged[NET_MAX_PAYLOAD];
+		netActorState got[NET_MAX_ACTORS_PER_PACKET];
+		netActorHeader hdr;
+
+		memset(forged,0,sizeof(forged));
+		forged[4] = (unsigned char)NET_MAX_ACTORS_PER_PACKET;	// count sits at offset 4
+
+		if(net_actor_unpack(&hdr,got,NET_MAX_ACTORS_PER_PACKET,forged,1) != 0){
+			net_logf(f,"FAIL actor: truncated payload accepted");
+			ok = 0;
+			}
+
+		if(net_actor_unpack(&hdr,got,NET_MAX_ACTORS_PER_PACKET,forged,
+				    (int)sizeof(netActorHeader)
+				    + NET_MAX_ACTORS_PER_PACKET * (int)sizeof(netActorState) - 1) != 0){
+			net_logf(f,"FAIL actor: payload one byte short accepted");
+			ok = 0;
+			}
+
+		if(net_actor_unpack(&hdr,got,NET_MAX_ACTORS_PER_PACKET,forged,
+				    (int)sizeof(netActorHeader)
+				    + NET_MAX_ACTORS_PER_PACKET * (int)sizeof(netActorState)) !=
+		   NET_MAX_ACTORS_PER_PACKET){
+			net_logf(f,"FAIL actor: full payload refused");
+			ok = 0;
+			}
+		}
+
+	if(net_actor_pack(NULL,0,1,NULL,0) != 0){
+		net_logf(f,"FAIL actor: empty batch accepted");
+		ok = 0;
+		}
+
+	net_logf(f,"actor: state %u bytes, batch %d actors, yaw modular",
+		(unsigned)sizeof(netActorState),NET_MAX_ACTORS_PER_PACKET);
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -1003,6 +1112,7 @@ int net_selftest(void)
 	int got_lobby = 0;
 	int got_snapshot = 0;
 	int got_spawn = 0;
+	int got_actor = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -1186,12 +1296,16 @@ int net_selftest(void)
 	if(!got_spawn)
 		net_logf(f,"FAIL net_test_spawn");
 
-	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && got_spawn && host_reliable == 1 &&
+	got_actor = net_test_actor(f);
+	if(!got_actor)
+		net_logf(f,"FAIL net_test_actor");
+
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && got_spawn && got_actor && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d spawn=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot,got_spawn);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d spawn=%d actor=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot,got_spawn,got_actor);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

@@ -1,3 +1,16 @@
+#ifndef __FXLAB_BODY_INTERFACE_H__
+#define __FXLAB_BODY_INTERFACE_H__
+
+/*
+	The bolide factory.
+
+	The bolide classes themselves live in fxlabBolide.h so that a layer which
+	only needs to name and rebuild them does not have to instantiate this
+	header's templates, or lay down the server-side chain those templates want.
+*/
+
+#include "fxlabBolide.h"
+
 #include "Meteorite.h"
 
 template<class ObjectType>
@@ -8,7 +21,7 @@ void fxlabCreateBolide(int model,int noise,const Vect3f& pos,const Vect3f& vel,f
 	fxlabGeneralObjectType* ct;
 
 	if(stat) ArcaneStatisticsService::setCurrentArcane(*stat);
-	p = new ObjectType(M3D_TOTAL_TYPE(model + fxlabServerRND.RND(noise),M3D_XREAL),pos,vel,damage,-1);
+	p = new ObjectType(M3D_TOTAL_TYPE(model + fxlabServerRND.RND(noise),M3D_XREAL), pos,vel,damage,-1);
 	if(protect){
 		op = dynamic_cast<OwnerProtection*>(p);
 		if(op) op->set_owner(protect->ProtectionID,protect->ProtectionTime);
@@ -49,70 +62,4 @@ void fxlabCreateSplinter(int model,int noise,Vect3f& pos,float rate,float start_
 	};
 };
 
-
-//Bomb
-class fxlabCannonBomb : public Meteorite
-{
-public:
-	fxlabCannonBomb(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID = 0)
-		: Meteorite( m3d_model, R_, V_, damage__, owner_ID) {}
-	void kill() override;
-};
-
-//VolcanicBomb
-class fxlabVolcanicBomb : public Meteorite
-{
-public:
-	fxlabVolcanicBomb(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID = 0)
-		: Meteorite( m3d_model, R_, V_, damage__, owner_ID) {}
-	void kill() override;
-};
-
-//FireBolide
-class fxlabFireBolide : public StatisticalMeteorite
-{
-public:
-	fxlabFireBolide(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID = 0)
-		: StatisticalMeteorite( m3d_model, R_, V_, damage__, owner_ID) { scaleRadius(2); }
-	void kill() override;
-};
-
-//FireBolide
-class fxlabSnowBall : public StatisticalMeteorite
-{
-public:
-	fxlabSnowBall(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID = 0);
-	void body_overlap_reaction(Body& body) override;
-	void calc_forces_and_drags() override;
-	void kill() override;
-};
-
-//Mortar
-class fxlabSleepyMortar : public BonusMeteorite
-{
-	MeasurementTimer color_time;
-public:
-	fxlabSleepyMortar(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID = 0);
-	void kill() override;
-	void quant() override;
-};
-
-//MinorBonus
-class fxlabMinorBonus : public BonusMeteorite
-{
-public:
-	fxlabMinorBonus(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID = 0)
-		: BonusMeteorite(m3d_model, R_, V_, damage__, owner_ID) {}
-	void body_overlap_reaction(Body& body) override;
-	void kill() override;
-};
-
-//MajorBonus
-class fxlabMajorBonus : public BonusMeteorite
-{
-public:
-	fxlabMajorBonus(int m3d_model, const Vect3f& R_, const Vect3f& V_, double damage__, int owner_ID)
-		: BonusMeteorite(m3d_model,R_,V_,damage__,owner_ID){ type_ = REAL_BONUS_METEORITE; }
-	void body_overlap_reaction(Body& body) override;
-	void kill() override;
-};
+#endif // __FXLAB_BODY_INTERFACE_H__

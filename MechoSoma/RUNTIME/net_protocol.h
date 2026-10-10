@@ -352,6 +352,15 @@ enum netEntityTypes
 	// Tracked, class C: these steer themselves toward players whose
 	// position the client only knows approximately, so local simulation
 	// cannot work. The host replicates their state instead.
+	//
+	// BonusMan is one type with four subclasses, and they are separated by
+	// netSpawn::variant rather than by four enum values: the split is a
+	// detail of the engine's factory, not of the protocol. See the
+	// netFxActorDef table in net_fx.cpp for the mapping.
+	//
+	// NET_ENT_WHALE is deliberately unused. There is no plain Whale body -
+	// Whale.h only declares WhaleRacer, which is a racer and travels as a
+	// snapshot, not as an actor.
 	NET_ENT_BONUS_MAN,
 	NET_ENT_BUTTERFLY,
 	NET_ENT_WICKED_BUTTERFLY,
@@ -360,6 +369,8 @@ enum netEntityTypes
 	NET_ENT_WHALE,
 	NET_ENT_FROG,
 	NET_ENT_WORM,
+	NET_ENT_CATERPILLAR,
+	NET_ENT_FISH,
 
 	// Areas, class C.
 	NET_ENT_TRAP_SPHERE,
@@ -375,6 +386,7 @@ struct netSpawn
 {
 	unsigned short entity_id;	// host assigned, unique per match
 	unsigned char type;			// netEntityTypes
+	unsigned char variant;		// which subclass of type, 0 when type has one
 	unsigned char owner_slot;	// 255 for none
 	signed short pos_x;
 	signed short pos_y;
@@ -458,8 +470,16 @@ struct netActorState
 
 /* ---------------------- INTEREST MANAGEMENT (CLASS C) -------------------- */
 
-// Actors far from every viewer are not replicated at all. They appear as a
-// spawn without state and start moving once a viewer comes close.
+// A tracked actor's pose is replicated only while somebody is near it, and
+// not at all beyond the spawn radius:
+//
+//   within VIEW_RADIUS of any viewer   - spawn and state every ACTOR_REPL_HZ
+//   within SPAWN_RADIUS                 - spawn only, no state
+//   beyond that                         - nothing, as if it did not exist
+//
+// "Viewer" is any racer on the host, not just the local player: a remote
+// racer being chased is as relevant to look at as one's own car, and every
+// client is drawing all of them from the same snapshots anyway.
 const int NET_ACTOR_REPL_HZ			= 10;
 const int NET_ACTOR_VIEW_RADIUS		= 1200;		// world units
 const int NET_ACTOR_SPAWN_RADIUS	= 2400;		// spawn this far out, tracked coarsely

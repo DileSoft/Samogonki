@@ -55,5 +55,16 @@ void net_fx_attach(Body* body);
 // A batch arrived. Raw payload including the batch header.
 void net_fx_spawn_recv(const unsigned char* data,unsigned int len);
 void net_fx_despawn_recv(const unsigned char* data,unsigned int len);
+void net_fx_actor_recv(const unsigned char* data,unsigned int len);
+
+/*
+	How many entities are tracked right now, split by class.
+
+	Not for the game to use - for the log. A live race is the only place the
+	registry, the classification and the factory lookup have ever run, and
+	"nothing appeared" is otherwise indistinguishable from "nothing was ever
+	sent".
+*/
+void net_fx_stats(int* projectiles,int* actors);
 
 #endif /* __NET_FX_H__ */

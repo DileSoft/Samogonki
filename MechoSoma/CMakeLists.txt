@@ -18,6 +18,7 @@ set(GAME_SOURCES
     FX/fxlabApplication.h
     FX/fxlabBodyInterface.cpp
     FX/fxlabBodyInterface.h
+    FX/fxlabBolide.h
     FX/fxlabClientEffect.cpp
     FX/fxlabClientEffect.h
     FX/fxlabClientGeneral.cpp

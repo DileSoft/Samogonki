@@ -1100,7 +1100,11 @@ void mchInitRaceDispatcher(void)
 	mch_raceD -> SetTime(mch_clock());
 
 #ifndef _WRLD_SCREENSHOTS_
-	if(!iWorldMode && !trkEnableFlag) {
+	// Only the host builds these. A bonus man is placed by random(2048), so
+	// every machine would put its own set somewhere else: a client that kept
+	// its own would show two sets, one of them standing where nobody is
+	// standing. The host's set travels as spawns instead.
+	if(!iWorldMode && !trkEnableFlag && !(mchNetGame && !mchNetHost)) {
 		//@caiiiycuk
 		Mdisp -> createBonusMen(const_cast<char*>(bonus_men_cfg));
 	}

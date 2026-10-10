@@ -95,6 +95,7 @@ static netSession* net_session_S = NULL;
 static unsigned int net_last_connect_ms = 0;
 static unsigned int net_last_input_ms = 0;
 static unsigned int net_last_snap_ms = 0;
+static unsigned int net_last_fx_log_ms = 0;
 static int net_client_ready = 0;
 static int net_last_player_count = -1;
 static int net_camera_set = 0;
@@ -264,6 +265,10 @@ static void net_game_handler(int type,const void* data,unsigned int len,void* pl
 
 		case NET_MSG_DESPAWN:
 			net_fx_despawn_recv((const unsigned char*)data,len);
+			return;
+
+		case NET_MSG_ACTOR_STATE:
+			net_fx_actor_recv((const unsigned char*)data,len);
 			return;
 		}
 
@@ -511,6 +516,22 @@ void mchNetQuant(void)
 	// Class B. Flushes whatever the host queued while bodies were being
 	// attached, and drops entries for bodies that died in the last frame.
 	net_fx_quant();
+
+	/*
+		The registry is the one part of the stack that has never once run, so
+		it says so, on a timer, rather than leaving a live test to guess. Every
+		ten seconds is plenty: what matters is whether the numbers move at all
+		when an arcane goes off and a bonus man is picked up.
+	*/
+	if(now - net_last_fx_log_ms >= 10000){
+		int projectiles = 0,actors = 0;
+
+		net_last_fx_log_ms = now;
+		net_fx_stats(&projectiles,&actors);
+
+		net_log("%s: entities %d projectile, %d actor",
+			mchNetHost ? "host" : "client",projectiles,actors);
+		}
 
 	/* --------------------------- drive the race ------------------------- */
 
