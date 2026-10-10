@@ -39,6 +39,14 @@ void fxlabGetArcanePosition(Mechos* owner,const Vect3f& offset,Vect3f& pos);
 extern int mchCurrentWorld;
 
 /*
+	These two arcanes read them, and so does fxlabClientArcaneStart(), which
+	sits above their old place, so they move up here. Values unchanged.
+*/
+const float FXLAB_FIRE_GARDEN_ROSE_LEN = 200.0f;
+const float FXLAB_FIRE_GARDEN_POSITION = 0;
+const float FXLAB_FURY_FUNGUS_RADIUS = 35.0f;
+
+/*
 	Client-side visual for an arcane, without the game part.
 
 	Mirrors only the fxlabClientD pieces of the matching Start() below - the
@@ -56,8 +64,9 @@ extern int mchCurrentWorld;
 	    at cast time on this machine.
 	  - per-interrupt pieces (a storm's later strikes, a seed's drops). They
 	    happen after the cast and are not part of the cast event.
-	  - FireGarden and FuryFungus, whose layouts need the file-scope constants
-	    declared further down and, for FuryFungus, the shared cosmetic RNG.
+
+	FuryFungus uses a deterministic ring instead of fxlabClientRND, because
+	that stream is shared with every other cosmetic effect.
 */
 
 // The shape every arcane uses for a one shot sound.
@@ -120,6 +129,38 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			fxlabClientArcaneSoundImpulse(Position,EFF_PETARD_START);
 			break;
 
+		//FireGarden
+		case ARCANE003:
+			{
+				int i;
+				Vect3f v,dv;
+
+				Position = owner->R();
+				Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),Position.z + owner->radius());
+				fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
+
+				v = owner->Yglobal() * FXLAB_FIRE_GARDEN_POSITION;
+				v += owner->Xglobal() * FXLAB_FIRE_GARDEN_ROSE_LEN * 0.5f;
+				dv = owner->Xglobal() * FXLAB_FIRE_GARDEN_ROSE_LEN / (float)(-FXLAB_FIRE_GARDEN_ROSE_NUM);
+				v += Position;
+
+				for(i = 0;i < FXLAB_FIRE_GARDEN_ROSE_NUM;i++){
+					CYCLE(v);
+					v += dv;
+					v.z = fxlabGetLevel(v.x,v.y,v.z + owner->radius());
+
+					t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_OBJECT_SET);
+					t->SetStartTime(fxlabClientD->GetTime());
+					t->SetKeyID(FXLAB_ID_KEY_ROSE_FIRE_SET);
+					t->SetPosition(v);
+					t->Start();
+				}
+
+				fxlabClientArcaneSoundImpulse(Position,EFF_LURID_BILLOW);
+				fxlabClientArcaneSoundLong(Position,EFF_LURID_BILLOW_ADD);
+			}
+			break;
+
 		//RageSlime
 		case ARCANE004:
 			Position = owner->R();
@@ -135,6 +176,56 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 
 			fxlabClientArcaneSoundLong(Position,EFF_SLIME_FURY);
 			fxlabClientArcaneSoundImpulse(Position,EFF_SLIME_FURY_ADD);
+			break;
+
+		//FuryFungus
+		case ARCANE005:
+			{
+				int i;
+				Vect3f v;
+
+				Position = owner->R();
+				Position.z += owner->radius();
+				fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
+
+				for(i = 0;i < FXLAB_FURY_FUNGUS_NUM;i++){
+					float a,r;
+
+					if(i < 7){
+						a = 6.2831853f * (float)i / 7.0f;
+						r = FXLAB_FURY_FUNGUS_RADIUS;
+					}else{
+						// Same ring, but without fxlabClientRND: that stream is
+						// shared with every other cosmetic effect, and drawing
+						// from it here would knock them all out of step.
+						a = 6.2831853f * (float)((i * 7) % 13) / 13.0f;
+						r = FXLAB_FURY_FUNGUS_RADIUS * (float)((i % 5) + 1) / 5.0f;
+					}
+
+					v = Position;
+					v += Vect3f(r * cosf(a),r * sinf(a),0);
+					CYCLE(v);
+					v.z = fxlabGetLevel(v.x,v.y,v.z + owner->radius()) + 10.0f;
+
+					t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_LASH_MODEL);
+					t->SetStartTime(fxlabClientD->GetTime());
+					t->SetKeyID(FXLAB_ID_KEY_FURY_FUNGUS_LASH);
+					t->SetPosition(v);
+					t->Start();
+				}
+
+				v = Position;
+				CYCLE(v);
+				v.z = fxlabGetLevel(v.x,v.y,v.z + owner->radius());
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SPARK_GENERATOR);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetKeyID(FXLAB_ID_KEY_FURY_FUNGUS_FOG);
+				t->SetPosition(v);
+				t->Start();
+
+				fxlabClientArcaneSoundLong(v,EFF_WILD_FUNGUS);
+			}
 			break;
 
 		//Tomato
@@ -1751,9 +1842,6 @@ void fxlabArcaneElecricStorm::InterruptAction()
 
 //------------------------------------------
 
-const float FXLAB_FIRE_GARDEN_ROSE_LEN = 200.0f;
-const float FXLAB_FIRE_GARDEN_POSITION = 0;
-
 void fxlabArcaneFireGarden::Start()
 {
 	int i;
@@ -1892,8 +1980,6 @@ void fxlabArcaneRageSlime::Quant()
 };
 
 //-------------------------------------------
-
-const float FXLAB_FURY_FUNGUS_RADIUS = 35.0f;
 
 void fxlabArcaneFuryFungus::Open()
 {

@@ -760,11 +760,13 @@ UDP не обещает, что первый дойдёт первым, а со�
   построил визуал локально. Раньше события шли только клиент→хост; теперь и
   хост→клиенты.
 
-Покрыто 24 аркана: звуковые эффекты (DragonWind, DirigibleWind,
+Покрыто 26 арканов: звуковые эффекты (DragonWind, DirigibleWind,
 ButterflyWind, FrogWind, Clown, Tomato, FireBall, LightningBolt, JumpBall,
 SpiderSpawn, CaterpillarSpawn) и автономные модели/линки (RageSlime,
 ShiftTrap, KineticHit, ElectricStorm, FireStone, SnowFall, BallWind,
-RevoltSpace, PlasmaClaw, BowMachine, ShaftMachine, Suicide, Petard).
+RevoltSpace, PlasmaClaw, BowMachine, ShaftMachine, Suicide, Petard,
+FireGarden, FuryFungus). FuryFungus рисует детерминированное кольцо вместо
+`fxlabClientRND` — этот поток общий со всей остальной косметикой.
 
 Сознательно **не** покрыты:
 
@@ -773,8 +775,6 @@ RevoltSpace, PlasmaClaw, BowMachine, ShaftMachine, Suicide, Petard).
   требуют указателя на тело, которого в момент каста на этой машине нет.
 * **Межинтервальные** куски (последующие удары грозы, капли семени) — они
   происходят после каста и в событие каста не входят.
-* **FireGarden** и **FuryFungus** — их раскладка требует файловых констант,
-  объявленных ниже по файлу, а FuryFungus ещё и общего косметического RNG.
 
 ## Этап 5 — режим игры
 
