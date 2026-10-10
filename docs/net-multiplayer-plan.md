@@ -760,8 +760,21 @@ UDP не обещает, что первый дойдёт первым, а со�
   построил визуал локально. Раньше события шли только клиент→хост; теперь и
   хост→клиенты.
 
-Покрыты пока `ARCANE004` RageSlime, `ARCANE034` KineticHit, `ARCANE048`
-ShiftTrap. Остальные арканы на клиенте по-прежнему невидимы.
+Покрыто 24 аркана: звуковые эффекты (DragonWind, DirigibleWind,
+ButterflyWind, FrogWind, Clown, Tomato, FireBall, LightningBolt, JumpBall,
+SpiderSpawn, CaterpillarSpawn) и автономные модели/линки (RageSlime,
+ShiftTrap, KineticHit, ElectricStorm, FireStone, SnowFall, BallWind,
+RevoltSpace, PlasmaClaw, BowMachine, ShaftMachine, Suicide, Petard).
+
+Сознательно **не** покрыты:
+
+* Всё, что аркан рождает как **тело** (файрболы, мины, шипы, спавн-твари,
+  выброшенные бонусы) — они и так едут классом B, а их клиентские линки
+  требуют указателя на тело, которого в момент каста на этой машине нет.
+* **Межинтервальные** куски (последующие удары грозы, капли семени) — они
+  происходят после каста и в событие каста не входят.
+* **FireGarden** и **FuryFungus** — их раскладка требует файловых констант,
+  объявленных ниже по файлу, а FuryFungus ещё и общего косметического RNG.
 
 ## Этап 5 — режим игры
 

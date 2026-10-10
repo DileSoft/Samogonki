@@ -49,9 +49,38 @@ extern int mchCurrentWorld;
 	Positions and keys are copied from the matching Start() in this file so the
 	client look matches the host's. If a Start() changes, change it here too.
 
-	Covered so far: ARCANE004 RageSlime, ARCANE034 KineticHit, ARCANE048
-	ShiftTrap. Anything else is invisible on a client.
+	Not here, on purpose:
+	  - anything the arcane produces as a Body (fireballs, mines, spikes,
+	    spawned creatures, thrown bonuses). Those travel as class B already,
+	    and their client-link FX need the body pointer, which does not exist
+	    at cast time on this machine.
+	  - per-interrupt pieces (a storm's later strikes, a seed's drops). They
+	    happen after the cast and are not part of the cast event.
+	  - FireGarden and FuryFungus, whose layouts need the file-scope constants
+	    declared further down and, for FuryFungus, the shared cosmetic RNG.
 */
+
+// The shape every arcane uses for a one shot sound.
+static void fxlabClientArcaneSoundImpulse(const Vect3f& p,int sound)
+{
+	fxlabGeneralObjectType* t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_IMPULSE);
+
+	t->SetStartTime(fxlabClientD->GetTime());
+	t->SetSoundID(sound);
+	t->SetPosition(p);
+	t->Start();
+}
+
+static void fxlabClientArcaneSoundLong(const Vect3f& p,int sound)
+{
+	fxlabGeneralObjectType* t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_LONG);
+
+	t->SetStartTime(fxlabClientD->GetTime());
+	t->SetSoundID(sound);
+	t->SetPosition(p);
+	t->Start();
+}
+
 void fxlabClientArcaneStart(int arcane_id,int owner_id)
 {
 	mchRacer* n;
@@ -73,6 +102,24 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 	if(!owner) return;
 
 	switch(arcane_id){
+		//Petard: the throw. The burst is a later interrupt.
+		case ARCANE002:
+			Position = owner->part_coords(M3D_FRONT);
+			{
+				Vect3f v = owner->Yglobal() * 3.0f;
+				v += owner->Zglobal();
+				v.Normalize(20.0f);
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_PETARD_MODEL);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetKeyID(FXLAB_ID_KEY_PETARD_MODEL);
+				t->SetPosition(Position);
+				t->SetVelocity(v);
+				t->Start();
+			}
+			fxlabClientArcaneSoundImpulse(Position,EFF_PETARD_START);
+			break;
+
 		//RageSlime
 		case ARCANE004:
 			Position = owner->R();
@@ -86,16 +133,99 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			t->SetMatrix(getPlacementPose(Position));
 			t->Start();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_LONG);
+			fxlabClientArcaneSoundLong(Position,EFF_SLIME_FURY);
+			fxlabClientArcaneSoundImpulse(Position,EFF_SLIME_FURY_ADD);
+			break;
+
+		//Tomato
+		case ARCANE012:
+			Position = owner->R();
+			fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
+			fxlabClientArcaneSoundImpulse(Position,EFF_TOMATO);
+			break;
+
+		//RevoltSpace
+		case ARCANE014:
+			Position = owner->R();
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_REVOLT_SPACE_LINK);
 			t->SetStartTime(fxlabClientD->GetTime());
-			t->SetSoundID(EFF_SLIME_FURY);
+			t->SetKeyID(FXLAB_ID_KEY_REVOLT_SPACE_LINK);
+			t->SetPosition(Position);
+			t->SetBody(owner);
+			t->Start();
+			break;
+
+		//SpiderSpawn: the spiders are bodies and travel as class B.
+		case ARCANE017:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_SPIDERS_ATTACK);
+			break;
+
+		//CaterpillarSpawn
+		case ARCANE021:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_CATERPILLAR);
+			break;
+
+		//FireStone
+		case ARCANE024:
+			Position = owner->R();
+			{
+				Vect3f v = owner->Yglobal() * 2.0f;
+				v += owner->Zglobal();
+				v.Normalize(40.0f);
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_BULLET_FIRE_MODEL);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetKeyID(FXLAB_ID_KEY_FIRE_BULLET_MODEL);
+				t->SetPosition(Position);
+				t->SetVelocity(v);
+				t->Start();
+			}
+			fxlabClientArcaneSoundImpulse(Position,EFF_STAR_SHOWER);
+			break;
+
+		//ElectricStorm: the opening only. Each later strike is an interrupt.
+		case ARCANE025:
+			Position = owner->R();
+			Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),Position.z + owner->radius());
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_ELECTRIC_STORM_MARKER_OMNI);
 			t->SetPosition(Position);
 			t->Start();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_IMPULSE);
+			Position.z += 150.0f;
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_TWISTER);
 			t->SetStartTime(fxlabClientD->GetTime());
-			t->SetSoundID(EFF_SLIME_FURY_ADD);
+			t->SetKeyID(FXLAB_ID_KEY_STORM_CLOUDS);
 			t->SetPosition(Position);
+			t->Start();
+
+			fxlabClientArcaneSoundImpulse(Position,EFF_THUNDERSTORM_ADD);
+			break;
+
+		//BowMachine
+		case ARCANE032:
+			Position = owner->part_coords(M3D_FRONT);
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_BOW_MACHINE_FRONT_LINK);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_BOW_MACHINE);
+			t->SetPosition(Position);
+			t->SetBody(owner);
+			t->Start();
+			break;
+
+		//ShaftMachine
+		case ARCANE033:
+			Position = owner->part_coords(M3D_FRONT);
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SHAFT_MECHINE_FRONT_LINK);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_SHAFT_MACHINE_LINK);
+			t->SetPosition(Position);
+			t->SetBody(owner);
 			t->Start();
 			break;
 
@@ -115,11 +245,69 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			t->SetPosition(Position);
 			t->Start();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_IMPULSE);
+			fxlabClientArcaneSoundImpulse(Position,EFF_KINETIC_HIT);
+			break;
+
+		//PlasmaClaw
+		case ARCANE036:
+			Position = owner->part_coords(M3D_FRONT);
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_WILD_CLAW_FRONT_LINK);
 			t->SetStartTime(fxlabClientD->GetTime());
-			t->SetSoundID(EFF_KINETIC_HIT);
+			t->SetKeyID(FXLAB_ID_KEY_WILD_CLAW);
+			t->SetPosition(Position);
+			t->SetBody(owner);
+			t->Start();
+			fxlabClientArcaneSoundImpulse(Position,EFF_TENTACLE);
+			break;
+
+		//JumpBall: the balls are bodies and travel as class B.
+		case ARCANE037:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_TITANIUM_BALLS);
+			break;
+
+		//FireBall: the ball is a body and travels as class B.
+		case ARCANE040:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_FIREBALLS);
+			break;
+
+		//Clown
+		case ARCANE041:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_CLOWN);
+			break;
+
+		//Suicide: the warrior is a body and travels as class B; this is its spark.
+		case ARCANE042:
+			Position = owner->R();
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SPARK_GENERATOR);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_CLOWN);
 			t->SetPosition(Position);
 			t->Start();
+			break;
+
+		//BallWind
+		case ARCANE045:
+			Position = owner->R();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_LEFT_BALL_WIND_LINK);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_BALL_WIND_LEFT_LINK);
+			t->SetPosition(Position);
+			t->SetBody(owner);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_RIGHT_BALL_WIND_LINK);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_BALL_WIND_RIGHT_LINK);
+			t->SetPosition(Position);
+			t->SetBody(owner);
+			t->Start();
+
+			fxlabClientArcaneSoundImpulse(Position,EFF_BULLET_FLIGHT);
+			fxlabClientArcaneSoundLong(Position,EFF_BULLET_FLIGHT_ADD);
 			break;
 
 		//ShiftTrap
@@ -141,11 +329,55 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 
 			t->Start();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_LONG);
-			t->SetStartTime(fxlabClientD->GetTime());
-			t->SetSoundID(EFF_TELEPORT);
-			t->SetPosition(Position);
-			t->Start();
+			fxlabClientArcaneSoundLong(Position,EFF_TELEPORT);
+			break;
+
+		//DragonWind
+		case ARCANE050:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_DRAGON_POWER_ADD);
+			break;
+
+		//FrogWind
+		case ARCANE052:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_FROG);
+			break;
+
+		//ButterflyWind
+		case ARCANE059:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_WING_BUTTERFLY);
+			break;
+
+		//DirigibleWind
+		case ARCANE060:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_DIRIGIBLE);
+			break;
+
+		//SnowFall
+		case ARCANE063:
+			Position = owner->R();
+			{
+				Vect3f v = owner->Yglobal() * 1.8f;
+				v += owner->Zglobal();
+				v.Normalize(40.0f);
+
+				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_BULLET_SNOW_MODEL);
+				t->SetStartTime(fxlabClientD->GetTime());
+				t->SetKeyID(FXLAB_ID_KEY_SNOW_BULLET_MODEL);
+				t->SetPosition(Position);
+				t->SetVelocity(v);
+				t->Start();
+			}
+			fxlabClientArcaneSoundImpulse(Position,EFF_SNOW_FALL);
+			break;
+
+		//LightningBolt: the bolt is a body and travels as class B.
+		case ARCANE066:
+			Position = owner->R();
+			fxlabClientArcaneSoundImpulse(Position,EFF_LIGHT_BOLT);
 			break;
 
 		default:
