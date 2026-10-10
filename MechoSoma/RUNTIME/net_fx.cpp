@@ -36,6 +36,7 @@
 #include "Butterfly.h"
 #include "BonusMan.h"
 #include "SmartMissile.h"
+#include "TitaniumBall.h"
 
 #include "race.h"
 
@@ -157,6 +158,11 @@ static int net_fx_type_of(const Body* b)
 	// that fired the arcane reads as a bug.
 	if(dynamic_cast<const fxlabMinorBonus*>(b)) return NET_ENT_MINOR_BONUS;
 	if(dynamic_cast<const fxlabMajorBonus*>(b)) return NET_ENT_MAJOR_BONUS;
+
+	// The three balls a completed mechos throws. Ballistic, fixed mesh, no
+	// random model - built with new rather than by factory name, so this is
+	// where they are told apart.
+	if(dynamic_cast<const TitaniumBall*>(b)) return NET_ENT_TITANIUM_BALL;
 
 	return 0;
 }
@@ -725,6 +731,16 @@ static void net_fx_create(const netSpawn* s)
 			case NET_ENT_SLEEPY_MORTAR:	p = new fxlabSleepyMortar(model,pos,vel,damage,-1); break;
 			case NET_ENT_MINOR_BONUS:	p = new fxlabMinorBonus(model,pos,vel,damage,-1); break;
 			case NET_ENT_MAJOR_BONUS:	p = new fxlabMajorBonus(model,pos,vel,damage,-1); break;
+
+			// The constructor turns its velocity argument into world units on
+			// its own (V_*Gravity*0.1), so it is built at rest and handed the
+			// host's velocity verbatim. Its spin is rolled from the local RNG
+			// and will differ from the host's; that is cosmetic and the price
+			// of not sending angular velocity.
+			case NET_ENT_TITANIUM_BALL:
+				p = new TitaniumBall(pos,Vect3f(0,0,0),damage,-1);
+				if(p) p -> setGlobalVelocity(vel);
+				break;
 
 			default: return;
 			}
