@@ -364,11 +364,9 @@ void PointControlledObject::control()
 	// packet is the steering of whoever owns that slot, and the vehicle on
 	// the host has to follow it rather than the path it was laid out on.
 	// Same standing the keyboard has when there is no control point.
-	if(net_controlled && active()){
-		net_control(net_input);
-		return;
-		}
-
+	//
+	// Inside the enable_control guard, not above it: a vehicle with control
+	// switched off must not move, whatever the source of the input.
 	if(enable_control)
 		if(num_control_points()){
 			#ifndef _FINAL_VERSION_
@@ -376,6 +374,9 @@ void PointControlledObject::control()
 					return;
 			#endif
 			point_control();
+			}
+		else if(net_controlled && active()){
+			net_control(net_input);
 			}
 		else{
 			if(!controled_only_by_point && active())
