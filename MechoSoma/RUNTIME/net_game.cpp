@@ -184,6 +184,170 @@ static void net_send_snapshot(void)
 		net_match_S -> sess() -> broadcast(NET_MSG_SNAPSHOT,payload,(unsigned int)bytes,0);
 }
 
+/* --------------------------- interpolation (A) --------------------------- */
+
+/*
+	Remote racers arrive at twenty poses a second. Applying each one on
+	arrival means twenty corrections a second, and at fifty milliseconds they
+	are visible: the local physics carries the car between two of them and the
+	next batch snaps it back.
+
+	This buffer keeps the last few snapshots and draws the car at a fixed
+	delay behind the newest one. Two ticks is the whole point of the delay: it
+	is long enough that the next snapshot has landed by the time the draw
+	reaches this one, so a pose is always an interpolation between two known
+	points and never an extrapolation that a late packet would have to be
+	yanked back from.
+
+	The host tick is the timeline, not the local clock. netMatch::update_tick
+	advances it once per NET_TICK_MS by construction, so it is uniform, while
+	arrivals are not. The newest tick plus the time since it landed is what
+	places "now" on the host's line.
+*/
+const int NET_INTERP_SAMPLES		= 3;
+const int NET_INTERP_DELAY_TICKS	= 2;
+
+struct netInterpSample
+{
+	unsigned int tick;
+	Vect3f pos;
+	float yaw;
+	Vect3f vel;
+};
+
+struct netInterpSlot
+{
+	int count;
+	unsigned int last_arrival_ms;
+	netInterpSample sample[NET_INTERP_SAMPLES];	// oldest first
+};
+
+static netInterpSlot net_interp[NET_MAX_PLAYERS];
+
+static void net_interp_reset(void)
+{
+	memset(net_interp,0,sizeof(net_interp));
+}
+
+static void net_interp_remember(int slot,unsigned int tick,const Vect3f& pos,float yaw,const Vect3f& vel)
+{
+	netInterpSlot* b;
+
+	if(slot < 0 || slot >= NET_MAX_PLAYERS) return;
+
+	b = &net_interp[slot];
+
+	// A tick that is not newer is a reordered or duplicated datagram. A
+	// repeat of the newest tick just refreshes it; anything older is dropped.
+	// Both keep the samples ascending, which is what the draw below walks.
+	if(b -> count && (int)(tick - b -> sample[b -> count - 1].tick) <= 0){
+		if(tick == b -> sample[b -> count - 1].tick){
+			b -> sample[b -> count - 1].pos = pos;
+			b -> sample[b -> count - 1].yaw = yaw;
+			b -> sample[b -> count - 1].vel = vel;
+			b -> last_arrival_ms = (unsigned int)clocki();
+			}
+		return;
+		}
+
+	if(b -> count >= NET_INTERP_SAMPLES){
+		for(int i = 1; i < NET_INTERP_SAMPLES; i ++)
+			b -> sample[i - 1] = b -> sample[i];
+
+		b -> count = NET_INTERP_SAMPLES - 1;
+		}
+
+	b -> sample[b -> count].tick = tick;
+	b -> sample[b -> count].pos = pos;
+	b -> sample[b -> count].yaw = yaw;
+	b -> sample[b -> count].vel = vel;
+	b -> count ++;
+
+	b -> last_arrival_ms = (unsigned int)clocki();
+}
+
+static void net_interp_apply(int slot,mchMechosRacer* mr)
+{
+	netInterpSlot* b = &net_interp[slot];
+	Vect3f pos,vel;
+	float yaw,rt,a,d;
+	int i;
+
+	if(!b -> count) return;
+
+	// One snapshot so far: nothing to interpolate yet, so use it as it is.
+	if(b -> count == 1){
+		mr -> setPosition(b -> sample[0].pos,b -> sample[0].yaw);
+		mr -> setGlobalVelocity(b -> sample[0].vel);
+		return;
+		}
+
+	// "Now" on the host's line: the newest tick plus however long it has been
+	// since that tick landed, pushed back by the delay.
+	rt = (float)b -> sample[b -> count - 1].tick
+	   + (float)((unsigned int)clocki() - b -> last_arrival_ms) / (float)NET_TICK_MS
+	   - (float)NET_INTERP_DELAY_TICKS;
+
+	// Behind the oldest or ahead of the newest: hold the nearest end rather
+	// than extrapolate. A stall shows as the car pausing, never as a snap.
+	if(rt <= (float)b -> sample[0].tick){
+		mr -> setPosition(b -> sample[0].pos,b -> sample[0].yaw);
+		mr -> setGlobalVelocity(b -> sample[0].vel);
+		return;
+		}
+
+	if(rt >= (float)b -> sample[b -> count - 1].tick){
+		i = b -> count - 1;
+		mr -> setPosition(b -> sample[i].pos,b -> sample[i].yaw);
+		mr -> setGlobalVelocity(b -> sample[i].vel);
+		return;
+		}
+
+	for(i = 0; i + 1 < b -> count; i ++)
+		if(rt < (float)b -> sample[i + 1].tick)
+			break;
+
+	a = (rt - (float)b -> sample[i].tick)
+	  / ((float)b -> sample[i + 1].tick - (float)b -> sample[i].tick);
+
+	pos = b -> sample[i].pos + (b -> sample[i + 1].pos - b -> sample[i].pos) * a;
+	vel = b -> sample[i].vel + (b -> sample[i + 1].vel - b -> sample[i].vel) * a;
+
+	// Angle goes the short way, or a car crossing the 2*PI seam would spin
+	// the long way round in the gap between two batches.
+	yaw = b -> sample[i].yaw;
+	d = b -> sample[i + 1].yaw - yaw;
+	while(d > (float)M_PI) d -= 2.0f * (float)M_PI;
+	while(d < -(float)M_PI) d += 2.0f * (float)M_PI;
+	yaw += d * a;
+
+	mr -> setPosition(pos,yaw);
+	mr -> setGlobalVelocity(vel);
+}
+
+// Client side, once per frame: put every remote racer on the interpolated
+// pose for now. The local racer is driven by local input and is skipped.
+static void net_apply_interpolation(void)
+{
+	mchRacer* rp;
+	int local = net_match_S -> local_slot();
+	int slot = 0;
+
+	if(mchNetHost) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp){
+		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
+
+		if(mr && slot != local)
+			net_interp_apply(slot,mr);
+
+		rp = rp -> next;
+		slot ++;
+		}
+}
+
 /*
 	Client side: put the host's view of a racer onto the local copy.
 
@@ -203,12 +367,7 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 	int local = net_match_S -> local_slot();
 	int count = net_snapshot_unpack(&hdr,racers,NET_MAX_PLAYERS,(const unsigned char*)data,len);
 
-	// The header carries the host's tick, which is what an interpolation
-	// buffer would key off. There is no buffer yet: poses are applied as they
-	// arrive, which is why every remote car here moves at twenty steps a
-	// second instead of smoothly.
-	(void)hdr;
-
+	// The header's tick is the interpolation timeline. See the buffer below.
 	for(int i = 0; i < count; i ++){
 		mchRacer* rp = mch_raceD -> racerLst -> search(racers[i].slot);
 		mchMechosRacer* mr;
@@ -239,14 +398,17 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 
 		if(racers[i].slot == local) continue;
 
-		mr -> setPosition(Vect3f(net_uq_world(racers[i].pos_x),
-					 net_uq_world(racers[i].pos_y),
-					 net_uq_height(racers[i].pos_z)),
-				  net_uq_yaw(racers[i].yaw));
-
-		mr -> setGlobalVelocity(Vect3f(net_uq_speed(racers[i].vel_x),
-					       net_uq_speed(racers[i].vel_y),
-					       (float)racers[i].vel_z));
+		// Buffered, not applied: the draw interpolates between the last two
+		// snapshots a fixed delay behind the newest. See
+		// net_apply_interpolation.
+		net_interp_remember(racers[i].slot,hdr.server_tick,
+				    Vect3f(net_uq_world(racers[i].pos_x),
+					   net_uq_world(racers[i].pos_y),
+					   net_uq_height(racers[i].pos_z)),
+				    net_uq_yaw(racers[i].yaw),
+				    Vect3f(net_uq_speed(racers[i].vel_x),
+					   net_uq_speed(racers[i].vel_y),
+					   (float)racers[i].vel_z));
 		}
 }
 
@@ -550,6 +712,7 @@ void mchNetStart(void)
 	// id, which is per match: the table starts empty.
 	net_fx_set_session(net_session_S);
 	net_fx_reset();
+	net_interp_reset();
 
 	// Zero asks for an ephemeral port, which is what a host wants: the
 	// client is told where to go, not the other way round.
@@ -597,6 +760,7 @@ void mchNetFinit(void)
 	// points at last race's projectiles would despawn somebody else's.
 	net_fx_set_session(NULL);
 	net_fx_reset();
+	net_interp_reset();
 
 	net_client_ready = 0;
 	net_camera_set = 0;
@@ -774,6 +938,11 @@ void mchNetQuant(void)
 	// Class B. Flushes whatever the host queued while bodies were being
 	// attached, and drops entries for bodies that died in the last frame.
 	net_fx_quant();
+
+	// Class A. Client only: remote racers are drawn on an interpolated pose
+	// between the last two snapshots. After the pump, so this frame's
+	// snapshots are already in the buffer.
+	net_apply_interpolation();
 
 	// Events go out on the same tick as the input, so that a spell and the
 	// steering that went with it are one story. A client queues them in
