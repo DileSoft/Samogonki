@@ -4,6 +4,7 @@
 
 #include "net_socket.h"
 #include "net_transport.h"
+#include "net_input.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -79,6 +80,160 @@ static int net_reliable_left(netSession* s)
 	return left;
 }
 
+/*
+	Input mapping test.
+
+	What is being pinned down here is the promise the wire format makes to
+	the vehicle controls: a setpoint that goes in comes back out close enough
+	that a client holding the stick at half deflection steers the same
+	vehicle on the host, and a value outside the range is refused rather
+	than silently folded somewhere else.
+
+	The smoothing itself is not covered, because it lives in Mechos and
+	reads vehicle state. What matters is that both paths feed the *same*
+	algorithm - see keyboard_control() and net_control() in Mechos.cpp, both
+	of which call apply_control() and nothing else.
+*/
+static int net_test_input(FILE* f)
+{
+	int ok = 1;
+
+	// A packed struct has to actually be packed, or the wire layout the
+	// host writes and the layout the client reads drift apart by the
+	// compiler's padding choices.
+	int expected = (int)(4 * sizeof(unsigned char) + sizeof(int));
+	if(sizeof(netInput) != expected){
+		net_logf(f,"FAIL sizeof(netInput) = %u, expected %d",sizeof(netInput),expected);
+		ok = 0;
+		}
+
+	// The contract that actually matters: a setpoint the client produces
+	// comes back out close enough that the host steers the same way. Sweep
+	// the input range, not the wire range, and demand less than half a step.
+	float worst = 0;
+	float worst_at = 0;
+
+	for(int i = 0; i <= 2000; i ++){
+		float x = -1.0f + 2.0f * (float)i / 2000.0f;
+		float back = net_input_expand(net_input_quantize(x));
+		float error = fabs(back - x);
+
+		if(error > worst){
+			worst = error;
+			worst_at = x;
+			}
+		}
+
+	if(worst > 0.5f / 127.0f + 1e-5f){
+		net_logf(f,"FAIL input round trip error %.6f at %.4f, tolerated %.6f",
+			worst,worst_at,0.5f / 127.0f);
+		ok = 0;
+		}
+
+	// Full deflection in both directions has to survive exactly.
+	if(net_input_quantize(1.0f) != 127 || net_input_expand((signed char)127) != 1.0f){
+		net_logf(f,"FAIL input positive full deflection: %d -> %f",
+			(int)net_input_quantize(1.0f),net_input_expand((signed char)127));
+		ok = 0;
+		}
+
+	// The low end of the wire range is one unit deeper and is clamped on
+	// purpose, since -128 would otherwise decode past full deflection.
+	if(net_input_expand((signed char)-128) != -1.0f){
+		net_logf(f,"FAIL input -128 not clamped: %f",net_input_expand((signed char)-128));
+		ok = 0;
+		}
+
+	if(net_input_quantize(-1.0f) != -127){
+		net_logf(f,"FAIL input negative full deflection: %d",(int)net_input_quantize(-1.0f));
+		ok = 0;
+		}
+
+	// Beyond full deflection must clamp, not wrap. The keyboard path can ask
+	// for a rudder of 2.0 when both turn keys are held at once, and that has
+	// to arrive as full lock rather than as none at all.
+	if(net_input_quantize(2.0f) != 127 || net_input_quantize(-2.0f) != -127){
+		net_logf(f,"FAIL input clamp: +2 -> %d, -2 -> %d",
+			(int)net_input_quantize(2.0f),(int)net_input_quantize(-2.0f));
+		ok = 0;
+		}
+
+	// A uniformly spinning signal must survive batching: four samples in,
+	// four samples out, same order, same values.
+	{
+		netInput out[NET_INPUT_BATCH];
+		netInput batch[NET_INPUT_BATCH];
+		unsigned char payload[NET_MAX_PAYLOAD];
+		int bytes, count;
+		int bad = 0;
+
+		for(int i = 0; i < NET_INPUT_BATCH; i ++){
+			memset(&batch[i],0,sizeof(batch[i]));
+			batch[i].tick = 1000 + (unsigned int)i;
+			batch[i].traction = (signed char)(i * 31 - 40);
+			batch[i].rudder = (signed char)(i * 17 - 30);
+			batch[i].buttons = (unsigned char)(i == 1 ? NET_BTN_HORN : 0);
+			}
+
+		bytes = net_input_pack(payload,sizeof(payload),batch,NET_INPUT_BATCH);
+		count = net_input_unpack(out,NET_INPUT_BATCH,payload,bytes);
+
+		if(bytes != 1 + NET_INPUT_BATCH * (int)sizeof(netInput) || count != NET_INPUT_BATCH){
+			net_logf(f,"FAIL input batch: %d bytes, %d samples of %d",bytes,count,NET_INPUT_BATCH);
+			ok = 0;
+			}
+		else {
+			for(int i = 0; i < NET_INPUT_BATCH; i ++)
+				if(memcmp(&batch[i],&out[i],sizeof(netInput))){
+					bad ++;
+					net_logf(f,"FAIL input batch sample %d: tick %u vs %u, traction %d vs %d, rudder %d vs %d, buttons %u vs %u",
+						i,batch[i].tick,out[i].tick,(int)batch[i].traction,(int)out[i].traction,
+						(int)batch[i].rudder,(int)out[i].rudder,(unsigned)batch[i].buttons,(unsigned)out[i].buttons);
+					}
+
+			if(bad) ok = 0;
+			}
+
+		// A payload lying about its sample count must be refused rather
+		// than trusted: it would otherwise run off the end of the array the
+		// caller handed over.
+		{
+			netInput small[1];
+			unsigned char forged[NET_MAX_PAYLOAD];
+			netInput many[NET_INPUT_BATCH];
+			int forged_bytes, got;
+
+			memset(forged,0,sizeof(forged));
+			forged[0] = (unsigned char)NET_INPUT_BATCH;
+
+			forged_bytes = 1 + NET_INPUT_BATCH * (int)sizeof(netInput);
+			got = net_input_unpack(small,1,forged,forged_bytes);
+
+			if(got != 1){
+				net_logf(f,"FAIL input batch clamp: asked for capacity 1, claimed %d, got %d",NET_INPUT_BATCH,got);
+				ok = 0;
+				}
+
+			got = net_input_unpack(many,NET_INPUT_BATCH,forged,1);
+			if(got != 0){
+				net_logf(f,"FAIL input batch truncated: short payload accepted, %d samples",got);
+				ok = 0;
+				}
+			}
+
+		// Zero and negative counts are not batches.
+		if(net_input_pack(payload,sizeof(payload),batch,0) != 0){
+			net_logf(f,"FAIL input batch: empty batch accepted");
+			ok = 0;
+			}
+		}
+
+	net_logf(f,"input: round trip error %.6f at %.4f, batch %d bytes",
+		worst,worst_at,1 + NET_INPUT_BATCH * (int)sizeof(netInput));
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -99,6 +254,7 @@ int net_selftest(void)
 
 	int got_welcome = 0;
 	int got_fragment = 0;
+	int got_input = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -113,6 +269,12 @@ int net_selftest(void)
 	unsigned short host_port = 0;
 
 	net_logf(f,"--- net transport self test ---");
+
+	// Input mapping first: it needs no sockets, so if it fails there is no
+	// point spending eight seconds on the transport to find out.
+	got_input = net_test_input(f);
+	if(!got_input)
+		net_logf(f,"FAIL net_test_input");
 
 	for(int i = 0; i < big_size; i ++)
 		big_buf[i] = (unsigned char)(i * 31 + 7);
@@ -263,12 +425,12 @@ int net_selftest(void)
 	net_logf(f,"keepalive PINGs seen by host: %d",keepalives);
 	net_logf(f,"burst sent %d, received %d, gaps %d",burst_sent,burst_recv,burst_gaps);
 
-	ok = (got_welcome && got_fragment && host_reliable == 1 &&
+	ok = (got_welcome && got_fragment && got_input && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d",
-		got_welcome,host_reliable,got_fragment);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d",
+		got_welcome,host_reliable,got_fragment,got_input);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

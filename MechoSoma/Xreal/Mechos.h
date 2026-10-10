@@ -10,6 +10,8 @@
 #include "AnimatedBody.h"
 #include "ArcaneStatistics.h"
 #include "PersonageDifferetiationPrm.h"
+#include "net_input.h"
+
 
 
 class BodyDispatcher;
@@ -344,6 +346,12 @@ protected:
 	void body_hit_reaction(const Body& body, const Contact& c);
 	void ground_hit_reaction(const Contact& c);
 	void keyboard_control();
+
+	// Управление сетевым вводом (см. PointControlledObject::net_control)
+	virtual void net_control(const netInput& input);
+
+	// Текущий локальный ввод в формате пакета - это шлёт клиент хосту
+	void read_input(netInput& in) const;
 	void write_state(XBuffer& buf);
 	float damage_ability(const Body& b) const;
 	
@@ -357,6 +365,9 @@ protected:
 
 	// Арканы, private part
 	int iron_hip_quant();
+
+	void read_raw_input(float& do_traction, float& do_rudder, int& horn) const;
+	void apply_control(float do_traction, float do_rudder, int horn);
 
 	// Wheels tool
 	WheelMode forward_wheels_mode();

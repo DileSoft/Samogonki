@@ -28,6 +28,7 @@ PointControlledObject::PointControlledObject()
 	check_points_only_controlled_ = 0;
 	disable_traction_modulation = 0;
 	ignore_point_control = 0;
+	net_controlled = 0;
 	do_brake = 0;
 	controled_only_by_point = 0;
 	enable_joystick_control = 0;
@@ -323,6 +324,22 @@ void PointControlledObject::reset_stopping()
 //__forceinline void average(Vect3f& x_avr, const Vect3f& x, float tau){ x_avr = x_avr*(1.f - tau) + tau*x; }
 //Vect3f actual_curvature_(0);
 
+void PointControlledObject::set_net_control(int on)
+{
+	net_controlled = on ? 1 : 0;
+	if(on)
+		// A vehicle that starts receiving input with a stale packet would
+		// snap to whatever the last sender asked for. Zero it out.
+		memset(&net_input,0,sizeof(net_input));
+}
+
+void PointControlledObject::net_control(const netInput& input)
+{
+	// Nothing to do here: the mapping from a packed packet to traction and
+	// rudder belongs to the vehicle, because only the vehicle knows its own
+	// state. Mechos overrides this.
+}
+
 void PointControlledObject::control()
 {
 	average( velocity_y_avr, Vlocal().y, velocity_y_avr_tau );
@@ -342,6 +359,15 @@ void PointControlledObject::control()
 		return;
 		}
 #endif
+
+	// Network control comes before control points. Input arriving in a
+	// packet is the steering of whoever owns that slot, and the vehicle on
+	// the host has to follow it rather than the path it was laid out on.
+	// Same standing the keyboard has when there is no control point.
+	if(net_controlled && active()){
+		net_control(net_input);
+		return;
+		}
 
 	if(enable_control)
 		if(num_control_points()){

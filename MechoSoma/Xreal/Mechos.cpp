@@ -1364,20 +1364,78 @@ void Mechos::control()
 		}
 }
 
-void Mechos::keyboard_control()
+void Mechos::read_raw_input(float& do_traction, float& do_rudder, int& horn) const
 {
-	float traction_incr = 1.; // скорость набора мощности
-	float traction_decr = 1; // скорость сброса (противоположная стрелка - мгновенно + тормоз)
-	  
-	// Traction
-	float do_traction = XJoystickGetYAxis() * 2./(float)RANGE_MAX;
+	// Joystick is read raw and in the units this code has always used, so a
+	// gamepad behaves exactly as it did before any of this existed.
+	do_traction = XJoystickGetYAxis() * 2./(float)RANGE_MAX;
+	do_rudder = XJoystickGetXAxis() * 2./(float)RANGE_MAX;
+
+	// Clamped here, before the keys are folded in, and deliberately nowhere
+	// else: the turn keys add up, so holding both used to reach a rudder ask
+	// of 2.0 on the keyboard and still does. Clamping the sum instead would
+	// quietly change how the keyboard plays.
 	if(fabs(do_traction) > 1)
 		do_traction = SIGN(do_traction);
+	if(fabs(do_rudder) > 1)
+		do_rudder = SIGN(do_rudder);
+
+	// Keys override the stick outright for traction and add up for the
+	// rudder: holding both turn keys leaves the steering neutral.
 	if(mchKeyPressed(MCH_KEY_MOVE_BACKWARD, control_config))
 		do_traction = -1;
 	if(mchKeyPressed(MCH_KEY_MOVE_FORWARD, control_config))
 		do_traction = 1;
+	if(mchKeyPressed(MCH_KEY_TURN_RIGHT, control_config))
+		do_rudder += 1;
+	if(mchKeyPressed(MCH_KEY_TURN_LEFT, control_config))
+		do_rudder += -1;
 
+	horn = mchKeyPressed(MCH_KEY_HORN, control_config);
+}
+
+void Mechos::keyboard_control()
+{
+	float do_traction, do_rudder;
+	int horn;
+
+	read_raw_input(do_traction, do_rudder, horn);
+
+	// Deliberately unquantized: local play must not lose precision to a wire
+	// format it never travels through.
+	apply_control(do_traction, do_rudder, horn);
+}
+
+void Mechos::read_input(netInput& in) const
+{
+	float do_traction, do_rudder;
+	int horn;
+
+	read_raw_input(do_traction, do_rudder, horn);
+
+	memset(&in, 0, sizeof(in));
+
+	in.traction = net_input_quantize(do_traction);
+	in.rudder = net_input_quantize(do_rudder);
+	if(horn)
+		in.buttons |= NET_BTN_HORN;
+}
+
+void Mechos::net_control(const netInput& input)
+{
+	// Setpoints, not filtered controls: see net_input.h for why the smoothing
+	// has to run here rather than on the machine the packet came from.
+	apply_control(net_input_expand(input.traction),
+		      net_input_expand(input.rudder),
+		      input.buttons & NET_BTN_HORN);
+}
+
+void Mechos::apply_control(float do_traction, float do_rudder, int horn)
+{
+	float traction_incr = 1.; // скорость набора мощности
+	float traction_decr = 1; // скорость сброса (противоположная стрелка - мгновенно + тормоз)
+
+	// Traction
 	if(do_traction > 0){
 		if(Vlocal().y > -5){
 			if((traction += traction_incr) > do_traction)
@@ -1407,14 +1465,11 @@ void Mechos::keyboard_control()
 
 
 	// Rudder
-	float do_rudder = XJoystickGetXAxis() * 2./(float)RANGE_MAX;
-	if(fabs(do_rudder) > 1)
-		do_rudder = SIGN(do_rudder);
-	if(mchKeyPressed(MCH_KEY_TURN_RIGHT, control_config))
-		do_rudder += 1;
-	if(mchKeyPressed(MCH_KEY_TURN_LEFT, control_config))
-		do_rudder += -1;
-
+	// Deliberately not clamped here. The turn keys add up, so holding both
+	// has always been able to push the rudder ask to 2.0, and that is
+	// existing vehicle behaviour rather than an input artefact. Clamping
+	// the sum instead would quietly change how the keyboard plays. The wire
+	// side is clamped on decode, in net_input_expand().
 	if(do_rudder > 0){
 		if(rudder < 0)
 			rudder = 0;
@@ -1431,7 +1486,7 @@ void Mechos::keyboard_control()
 		else
 			rudder = 0;
 
-	if(mchKeyPressed(MCH_KEY_HORN, control_config)){
+	if(horn){
 		if(!beep_pressed){
 			beep();
 			beep_pressed = 1;
@@ -2473,4 +2528,5 @@ void Mechos::applyWheelsForce()
 				startSound(EFF_MECHOS_BRAKE);
 			}
 }
+
 

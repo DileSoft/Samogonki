@@ -5,6 +5,7 @@
 #define __POINT_CONTROLLED_OBJECT__
 
 #include "ControlledObject.h"
+#include "net_input.h"
 
 class PointControlledObject : virtual public ControlledObject 
 {
@@ -23,7 +24,8 @@ protected:
 	unsigned int AI_controlled : 1; // Управляется АИ
 	unsigned int check_points_only_controlled_ : 1; // Управляется только чек-пойтами (без промежуточных контрол-пойнтов)
 	unsigned int disable_traction_modulation : 1; // Как расстоянием от семени до семени, так и внешним АИ
-	unsigned int ignore_point_control : 1; // Для лягушки, которая прыгает по кувшинкам
+	unsigned int ignore_point_control : 1;
+	unsigned int net_controlled : 1; // Управление приходит пакетами, а не с клавиатуры // Для лягушки, которая прыгает по кувшинкам
 
 	// Control points ///////
 	float traction_modulation; // 0..2, по умолчанию 1  
@@ -43,6 +45,9 @@ protected:
 	AverageConditionTimer backward_maneuver_obstacle_timer;
 	AverageConditionTimer backward_maneuver_velocity_timer;
 	DurationTimer backward_maneuver;
+
+	// Network
+	netInput net_input;	// последний полученный ввод, читается в control()
 
 	// Curvature
 	float required_curvature;
@@ -72,7 +77,14 @@ public:
 	void take_control_point(); // recalculates control parameters
 
 	void control();
-	void target_achieved(); 
+	void target_achieved();
+
+	// Network control
+	void set_net_control(int on);
+	void set_net_input(const netInput& in) { net_input = in; net_controlled = 1; }
+	const netInput& get_net_input() const { return net_input; }
+	int is_net_controlled() const { return net_controlled; }
+	virtual void net_control(const netInput& input);
 	void show() const;
 
 	void disable_control() { enable_control = 0; rudder = 0; traction = 0; }
