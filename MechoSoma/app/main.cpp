@@ -27,6 +27,7 @@
 #include <sokol_gfx.h>
 
 #include "xtool.h"
+#include "mechosoma.h"
 
 int xtSysQuantDisabled = 0;
 
@@ -111,6 +112,21 @@ int main(int argc, char const *argv[]) {
   for (int i = 1; i < argc; ++i) {
       if (strcmp(argv[i], "-nettest") == 0) {
           return run_net_selftest();
+      }
+      // -nethost runs this copy as the session host, -netjoin <address> points
+      // it at one. The race itself still starts from the menus: only the mode
+      // is armed here, so a race started by hand on both machines arrives at
+      // the same branch. Skipping the menus would need a lobby screen to wait
+      // in, which the menu phase (6) adds.
+      if (strcmp(argv[i], "-nethost") == 0) {
+          mchNetGame = 1;
+          mchNetHost = 1;
+      }
+      if (strcmp(argv[i], "-netjoin") == 0 && i + 1 < argc) {
+          mchNetGame = 1;
+          mchNetHost = 0;
+          strncpy(mchNetJoinAddr, argv[i + 1], sizeof(mchNetJoinAddr) - 1);
+          mchNetJoinAddr[sizeof(mchNetJoinAddr) - 1] = '\0';
       }
   }
   #ifdef STEAM_VERSION

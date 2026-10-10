@@ -136,6 +136,10 @@ public:
 	void set_control_config(int config) { control_config = config; }
 	int get_control_config() const { return control_config; }
 
+	// Current controls in the form a packet carries. The client sends this,
+	// the host applies it to the vehicle that owns that slot.
+	void read_input(netInput& in) const;
+
 	// Состояние мехоса /////////////
 	const State& state() const { return state_; }
 
@@ -350,8 +354,6 @@ protected:
 	// Управление сетевым вводом (см. PointControlledObject::net_control)
 	virtual void net_control(const netInput& input);
 
-	// Текущий локальный ввод в формате пакета - это шлёт клиент хосту
-	void read_input(netInput& in) const;
 	void write_state(XBuffer& buf);
 	float damage_ability(const Body& b) const;
 	

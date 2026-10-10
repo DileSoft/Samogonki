@@ -124,6 +124,35 @@ extern int mchGameMode;
 extern int mchTurnBasedGame;
 extern int mchSplitScreenGame;
 
+/*
+	Arcade multiplayer. These are set before a race starts, from the command
+	line or from the network menu, and are read by GameQuantRTO::Init and
+	GameQuantRTO::Quant. The implementation lives in net_game.cpp, which is
+	the only place that knows how both the match layer and the game fit
+	together.
+
+	mchNetHost    1 = this machine runs the session
+	mchNetGame    1 = the current race is a net race. Cleared when it ends.
+*/
+extern int mchNetGame;
+extern int mchNetHost;
+extern char mchNetJoinAddr[128];
+extern int mchNetPort;
+extern const char* mchNetStatusText;
+
+void mchNetStart(void);
+void mchNetFinit(void);
+void mchNetQuant(void);
+
+// Read only, for the UI. All safe to call with no session running.
+int  mchNetIsActive(void);
+int  mchNetState(void);
+int  mchNetLocalSlot(void);
+int  mchNetNumPlayers(void);
+int  mchNetNumReady(void);
+const char* mchNetPlayerName(int slot);
+const char* mchNetStatus(void);
+
 extern int mchPBEM_Game;
 extern int mchPBEM_GameMode;	// edit/view turn, etc.
 extern int mchPBEM_CurPlayer;

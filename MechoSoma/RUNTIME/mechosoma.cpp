@@ -713,6 +713,14 @@ void GameQuantRTO::Init(int id)
 				mchNumLaps = mchNumLapsDefHS;
 		}
 
+		if(mchNetGame){
+			// A net race runs the full grid: every slot needs a car, and the
+			// roster numbers slots in the order the race builds racers, so
+			// the two have to agree on the count. mchNumRacers is the number
+			// of opponents, hence one less than the grid.
+			mchNumRacers = HS_PLAYERS_MAX - 1;
+		}
+
 		if(mchGameMode == MCH_ENTIRE_CONTROL_HS){
 			XRndVal = hsRndSeed;
 			if(!mchPBEM_Game){
@@ -812,7 +820,17 @@ void GameQuantRTO::Init(int id)
 				if(!mchMusicMute) mchSetMusicMode(MCH_CD_SHOW);
 			}
 			else {
-				if(!iWorldMode && mchEnableTrackDemo){
+				if(mchNetGame){
+					// Net races begin on neither the local start counter nor
+					// the player's say so: the moment comes from the host's
+					// tick and mchNetQuant() makes the call.
+					mchNetStart();
+
+					mchSetTimeMode(MCH_TIME_STOPPED);
+					mchA_ShowStartCountDisable();
+					camera_dispatcher -> setStopTime();
+					}
+				else if(!iWorldMode && mchEnableTrackDemo){
 					mchInitTrackDemo();
 				}
 				else {
@@ -955,6 +973,12 @@ int GameQuantRTO::Quant(void)
 	//  Logical calculations	
 	start_timer(physics, STAT_TOTAL);
 
+	// Network input has to be applied before the simulation step that reads
+	// it, and the race start has to be gated here rather than in the start
+	// counter. No-op when mchNetGame is zero.
+	if(mchNetGame)
+		mchNetQuant();
+
 	resource_dispatcher.quant();
 
 	if(!mchXRecorderMode && iWorldMode){
@@ -1053,6 +1077,14 @@ void GameQuantRTO::Finit(void)
 {
 	if(mchXRecorderMode)
 		mchRecorderDone();
+
+	if(mchNetGame){
+		// Before anything else: the race is over, so there is nothing left
+		// for the match layer to steer. Clearing the flag here means the
+		// next race starts as an ordinary one unless a menu sets it again.
+		mchNetFinit();
+		mchNetGame = 0;
+		}
 
 	if(NextID != RTO_LOADING_ID)
 		mchFinitDemo();
