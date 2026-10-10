@@ -6,10 +6,13 @@
 #include "net_socket.h"
 #include "net_match.h"
 #include "net_snapshot.h"
+#include "net_fx.h"
+#include "net_spawn.h"
 
 #include "mechosoma.h"
 #include "race.h"
 #include "Mechos.h"
+#include "fxlabGeneral.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -183,6 +186,12 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 	int local = net_match_S -> local_slot();
 	int count = net_snapshot_unpack(&hdr,racers,NET_MAX_PLAYERS,(const unsigned char*)data,len);
 
+	// The header carries the host's tick, which is what an interpolation
+	// buffer would key off. There is no buffer yet: poses are applied as they
+	// arrive, which is why every remote car here moves at twenty steps a
+	// second instead of smoothly.
+	(void)hdr;
+
 	for(int i = 0; i < count; i ++){
 		mchRacer* rp = mch_raceD -> racerLst -> search(racers[i].slot);
 		mchMechosRacer* mr;
@@ -190,6 +199,7 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		if(!rp || racers[i].slot == local) continue;
 
 		mr = dynamic_cast<mchMechosRacer*>(rp);
+
 		if(!mr) continue;
 
 		mr -> setPosition(Vect3f(net_uq_world(racers[i].pos_x),
@@ -203,13 +213,63 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		}
 }
 
-static void net_game_handler(int type,const void* data,unsigned int len,void* user)
+/*
+	Class D: the cosmetic RNG.
+
+	The host sends a seed once, in the welcome, and every machine rolls
+	fxlabClientRND from it. That is what makes dust, trail noise and every
+	other purely local effect agree across machines without any of them being
+	sent: they are drawn from the same stream in the same order.
+
+	Deliberately not the gameplay RNG. That one feeds the same solver the
+	physics does, and sharing it would mean every machine had to reproduce
+	every frame exactly, which is the lockstep design this protocol is not.
+
+	Seeded once per match, because the welcome arrives once per match.
+*/
+static int net_rnd_seeded = 0;
+
+static void net_seed_cosmetic_rng(void)
 {
-	(void)user;
+	netWelcome w;
+	unsigned int seed;
 
-	if(type != NET_MSG_SNAPSHOT) return;
+	// Seeded already, or no welcome yet. Both are normal: the second is just
+	// a client that has not been told its slot.
+	if(net_rnd_seeded || !net_match_S -> welcome(&w)) return;
 
-	net_apply_snapshot(data,len);
+	seed = (unsigned int)w.client_rnd[0]
+	     | ((unsigned int)w.client_rnd[1] << 8)
+	     | ((unsigned int)w.client_rnd[2] << 16)
+	     | ((unsigned int)w.client_rnd[3] << 24);
+
+	fxlabClientRND.Open(seed);
+	net_rnd_seeded = 1;
+
+	net_log("client: cosmetic rng seeded with %08x",seed);
+}
+
+static void net_game_handler(int type,const void* data,unsigned int len,void* player)
+{
+	(void)player;
+
+	switch(type){
+		case NET_MSG_SNAPSHOT:
+			net_apply_snapshot(data,len);
+			return;
+
+		case NET_MSG_SPAWN:
+			net_fx_spawn_recv((const unsigned char*)data,len);
+			return;
+
+		case NET_MSG_DESPAWN:
+			net_fx_despawn_recv((const unsigned char*)data,len);
+			return;
+		}
+
+	// Anything else is the roster's business, or a message this build does not
+	// know: a newer client talking to an older host sends types this has never
+	// heard of, and ignoring them is the whole of the compatibility story.
 }
 
 void mchNetStart(void)
@@ -223,6 +283,11 @@ void mchNetStart(void)
 	// Snapshots mean nothing to the roster, so the match layer must hand them
 	// on rather than read them and throw them away.
 	net_match_S -> set_handler(net_game_handler,NULL);
+
+	// Projectiles travel as their own message types and are tracked by entity
+	// id, which is per match: the table starts empty.
+	net_fx_set_session(net_session_S);
+	net_fx_reset();
 
 	// Zero asks for an ephemeral port, which is what a host wants: the
 	// client is told where to go, not the other way round.
@@ -266,10 +331,16 @@ void mchNetFinit(void)
 	net_session_S = NULL;
 	net_S = NULL;
 
+	// Body ids restart from zero for the next race, so a table that still
+	// points at last race's projectiles would despawn somebody else's.
+	net_fx_set_session(NULL);
+	net_fx_reset();
+
 	net_client_ready = 0;
 	net_camera_set = 0;
 	net_last_player_count = -1;
 	net_start_logged = 0;
+	net_rnd_seeded = 0;
 
 	mchNetStatusText = "";
 
@@ -432,6 +503,14 @@ void mchNetQuant(void)
 
 	net_session_S -> quant();
 	net_match_S -> quant();
+
+	// Class D seed. After the pump because that is when the welcome lands.
+	if(!mchNetHost)
+		net_seed_cosmetic_rng();
+
+	// Class B. Flushes whatever the host queued while bodies were being
+	// attached, and drops entries for bodies that died in the last frame.
+	net_fx_quant();
 
 	/* --------------------------- drive the race ------------------------- */
 

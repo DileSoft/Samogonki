@@ -50,6 +50,9 @@ netMatch::netMatch(netSession* sess) : _sess(sess)
 	_last_roster_ms = 0;
 	_roster_dirty = 0;
 
+	_has_welcome = 0;
+	memset(&_welcome,0,sizeof(_welcome));
+
 	_handler = NULL;
 	_user = NULL;
 
@@ -266,6 +269,15 @@ int netMatch::ms_until_start(void) const
 	return (int)(_start_time_ms - (unsigned int)clocki());
 }
 
+int netMatch::welcome(netWelcome* out) const
+{
+	if(!_has_welcome || !out) return 0;
+
+	*out = _welcome;
+
+	return 1;
+}
+
 int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 {
 	switch(type){
@@ -287,8 +299,11 @@ int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 			// w -> client_rnd seeds fxlabClientRND, so effects that are never
 			// replicated still match what everyone else sees. That is wired
 			// up where the game layer starts, not here.
+			_welcome = *w;
+			_has_welcome = 1;
+
 			set_status("In lobby");
-			break;
+			return 1;
 			}
 
 		case NET_MSG_ROSTER:{
@@ -403,6 +418,23 @@ void netMatch::send_welcome(int peer_id,int slot)
 	w.world_id = _world_id;
 	w.track_id = _track_id;
 	w.laps = _laps;
+
+	// Seed for the cosmetic RNG. The point is not secrecy, it is that every
+	// machine draws from the same stream: dust, trail noise and every other
+	// effect that is rolled for locally then look identical everywhere
+	// without the server ever having to send one of them.
+	//
+	// Mixed from the clock and the tick, which is enough here and no more.
+	// The gameplay RNG is not shared and must not be: it feeds the same solver
+	// the physics does, and reproducing it would mean reproducing every frame.
+	{
+		unsigned int seed = ((unsigned int)clocki() * 2654435761u) ^ (_sess -> tick() * 40503u) ^ ((unsigned int)slot * 2246822519u);
+
+		w.client_rnd[0] = (unsigned char)(seed & 0xff);
+		w.client_rnd[1] = (unsigned char)((seed >> 8) & 0xff);
+		w.client_rnd[2] = (unsigned char)((seed >> 16) & 0xff);
+		w.client_rnd[3] = (unsigned char)((seed >> 24) & 0xff);
+		}
 
 	strncpy((char*)w.server_name,_players[NET_SLOT_HOST].name,NET_NAME_LEN - 1);
 	w.server_name[NET_NAME_LEN - 1] = 0;

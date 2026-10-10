@@ -112,6 +112,11 @@ public:
 	// Text of the last thing that went wrong, for the UI.
 	const char* status(void) const { return _status; }
 
+	// Client only: the welcome as it arrived, copied on receipt rather than
+	// kept. The game layer needs the cosmetic RNG seed out of it, and should
+	// not have to intercept a message this layer owns.
+	int welcome(netWelcome* out) const;
+
 	netSession* sess(void) const { return _sess; }
 
 private:
@@ -139,6 +144,9 @@ private:
 	int _has_input[NET_MAX_PLAYERS];
 
 	netMatchPlayer _players[NET_MAX_PLAYERS];
+
+	netWelcome _welcome;
+	int _has_welcome;
 
 	netMatchHandler _handler;
 	void* _user;

@@ -7,6 +7,7 @@
 #include "net_input.h"
 #include "net_match.h"
 #include "net_snapshot.h"
+#include "net_spawn.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -747,6 +748,237 @@ static int net_test_snapshot(FILE* f)
 	return ok;
 }
 
+/*
+	Spawn codec test.
+
+	A spawn is the only message whose content the receiver cannot check
+	against anything: position and velocity are the body's own initial
+	conditions, so what is being pinned down is that they survive the round
+	trip, that the mesh id arrives untouched, and that a payload claiming more
+	than it holds is refused rather than read past its end.
+
+	The two cases worth naming are the clamp ends. A position past +-8192 has
+	to come back as 8192 rather than wrapping to the far side of the world,
+	and a velocity past 32767 does the same: a wrapped spawn puts a projectile
+	on the wrong side of the map travelling the wrong way, and there is nothing
+	downstream that would ever notice.
+*/
+static int net_test_spawn(FILE* f)
+{
+	int ok = 1;
+
+	// Wire sizes. Packed, or the memcpy would ship padding and two builds of
+	// the same code would disagree on how long a spawn is.
+	if(sizeof(netSpawn) != 22 || sizeof(netSpawnHeader) != 5){
+		net_logf(f,"FAIL sizeof spawn %u/%u, expected 22/5",
+			(unsigned)sizeof(netSpawn),(unsigned)sizeof(netSpawnHeader));
+		ok = 0;
+		}
+
+	if(sizeof(netDespawn) != 3 || sizeof(netDespawnHeader) != 1){
+		net_logf(f,"FAIL sizeof despawn %u/%u, expected 3/1",
+			(unsigned)sizeof(netDespawn),(unsigned)sizeof(netDespawnHeader));
+		ok = 0;
+		}
+
+	// Position: signed, unlike the racer's folded coordinate, because a body
+	// is born wherever the caster is and only wraps on the following step.
+	{
+		float worst = 0;
+
+		for(int i = 0; i <= 2000; i ++){
+			float p = -2000.0f + 4000.0f * (float)i / 2000.0f;
+			float back = net_uq_spawn_pos(net_q_spawn_pos(p));
+			float error = fabs(back - p);
+
+			if(error > worst) worst = error;
+			}
+
+		if(worst > 1.0f / (float)NET_Q_SPAWN_POS + 1e-4f){
+			net_logf(f,"FAIL spawn position error %.6f, tolerated %.6f",
+				worst,1.0f / (float)NET_Q_SPAWN_POS);
+			ok = 0;
+			}
+
+		if(net_q_spawn_pos(100000.0f) != 32767 || net_q_spawn_pos(-100000.0f) != -32768){
+			net_logf(f,"FAIL spawn position clamp: %d / %d",
+				(int)net_q_spawn_pos(100000.0f),(int)net_q_spawn_pos(-100000.0f));
+			ok = 0;
+			}
+		}
+
+	// Velocity: the signed twin of the racer's speed quantization. The sweep
+	// stops at the wire ends rather than past them: +-512 is the range the
+	// scale buys, and anything faster is clamped rather than wrapped, which
+	// is what the last two checks are for.
+	{
+		float worst = 0;
+		float top = 32767.0f / (float)NET_Q_SPEED_XY;
+
+		for(int i = 0; i <= 1000; i ++){
+			float v = -top + 2.0f * top * (float)i / 1000.0f;
+			float back = net_uq_signed_speed(net_q_signed_speed(v));
+			float error = fabs(back - v);
+
+			if(error > worst) worst = error;
+			}
+
+		if(worst > 1.0f / (float)NET_Q_SPEED_XY + 1e-4f){
+			net_logf(f,"FAIL spawn velocity error %.6f, tolerated %.6f",
+				worst,1.0f / (float)NET_Q_SPEED_XY);
+			ok = 0;
+			}
+
+		if(net_q_signed_speed(100000.0f) != 32767 || net_q_signed_speed(-100000.0f) != -32768){
+			net_logf(f,"FAIL spawn velocity clamp: %d / %d",
+				(int)net_q_signed_speed(100000.0f),(int)net_q_signed_speed(-100000.0f));
+			ok = 0;
+			}
+
+		// Just past the end of the range, which is where a wrapping
+		// implementation would put a projectile on the far side of the map
+		// going the other way. Note the asymmetry: +512 does not fit and
+		// clamps to 32767, while -512 lands exactly on -32768. That is the
+		// shape of a signed short, not a bug.
+		if(net_q_signed_speed(600.0f) != 32767 || net_q_signed_speed(-600.0f) != -32768){
+			net_logf(f,"FAIL spawn velocity over range: %d / %d, expected %d / %d",
+				(int)net_q_signed_speed(600.0f),(int)net_q_signed_speed(-600.0f),32767,-32768);
+			ok = 0;
+			}
+		}
+
+	// Pack and unpack a full batch, values intact.
+	{
+		netSpawn sent[NET_MAX_SPAWN_PER_PACKET];
+		netSpawn got[NET_MAX_SPAWN_PER_PACKET];
+		netSpawnHeader hdr;
+		unsigned char payload[NET_MAX_PAYLOAD];
+		int bytes,count;
+
+		for(int i = 0; i < NET_MAX_SPAWN_PER_PACKET; i ++){
+			memset(&sent[i],0,sizeof(netSpawn));
+
+			sent[i].entity_id = (unsigned short)(i + 1);
+			sent[i].type = (unsigned char)(NET_ENT_CANNON_BOMB + i);
+			sent[i].owner_slot = 255;
+			sent[i].pos_x = net_q_spawn_pos(100.0f + 13.0f * (float)i);
+			sent[i].pos_y = net_q_spawn_pos(-250.0f + 7.0f * (float)i);
+			sent[i].pos_z = net_q_spawn_pos(30.0f - 2.0f * (float)i);
+			sent[i].vel_x = net_q_signed_speed(50.0f * (float)i);
+			sent[i].vel_y = net_q_signed_speed(-20.0f * (float)i);
+			sent[i].vel_z = net_q_signed_speed(5.0f * (float)i);
+			sent[i].model_id = (unsigned short)(0x40000 + i);
+			sent[i].lifetime_ms = 0;
+			sent[i].damage = (unsigned char)i;
+			sent[i].flags = 0;
+			}
+
+		bytes = net_spawn_pack(payload,sizeof(payload),98765,sent,NET_MAX_SPAWN_PER_PACKET);
+		count = net_spawn_unpack(&hdr,got,NET_MAX_SPAWN_PER_PACKET,payload,bytes);
+
+		if(bytes != (int)sizeof(netSpawnHeader) + NET_MAX_SPAWN_PER_PACKET * (int)sizeof(netSpawn) ||
+		   count != NET_MAX_SPAWN_PER_PACKET || hdr.server_tick != 98765){
+			net_logf(f,"FAIL spawn batch: %d bytes, %d of %d entities, tick %u",
+				bytes,count,NET_MAX_SPAWN_PER_PACKET,(unsigned)hdr.server_tick);
+			ok = 0;
+			}
+		else {
+			for(int i = 0; i < NET_MAX_SPAWN_PER_PACKET; i ++)
+				if(memcmp(&sent[i],&got[i],sizeof(netSpawn))){
+					net_logf(f,"FAIL spawn entity %d differs after round trip",i);
+					ok = 0;
+					}
+			}
+
+		// A payload claiming more entities than it holds must be refused, not
+		// clamped down to what fits: half an entity is worse than none.
+		{
+			unsigned char forged[NET_MAX_PAYLOAD];
+
+			memset(forged,0,sizeof(forged));
+			forged[4] = (unsigned char)NET_MAX_SPAWN_PER_PACKET;	// count sits at offset 4
+
+			if(net_spawn_unpack(&hdr,got,NET_MAX_SPAWN_PER_PACKET,forged,1) != 0){
+				net_logf(f,"FAIL spawn: truncated payload accepted");
+				ok = 0;
+				}
+
+			if(net_spawn_unpack(&hdr,got,NET_MAX_SPAWN_PER_PACKET,forged,
+					    (int)sizeof(netSpawnHeader)
+					    + NET_MAX_SPAWN_PER_PACKET * (int)sizeof(netSpawn) - 1) != 0){
+				net_logf(f,"FAIL spawn: payload one byte short accepted");
+				ok = 0;
+				}
+
+			// And a caller who can hold fewer than the batch says does get
+			// only as many as there is room for.
+			if(net_spawn_unpack(&hdr,got,2,forged,
+					    (int)sizeof(netSpawnHeader)
+					    + NET_MAX_SPAWN_PER_PACKET * (int)sizeof(netSpawn)) != 2){
+				net_logf(f,"FAIL spawn: capacity not clamped");
+				ok = 0;
+				}
+			}
+
+		if(net_spawn_pack(payload,sizeof(payload),1,sent,0) != 0){
+			net_logf(f,"FAIL spawn: empty batch accepted");
+			ok = 0;
+			}
+
+		if(net_spawn_pack(payload,sizeof(payload),1,sent,NET_MAX_SPAWN_PER_PACKET + 1) != 0){
+			net_logf(f,"FAIL spawn: oversized batch accepted");
+			ok = 0;
+			}
+		}
+
+	// Despawn round trip.
+	{
+		netDespawn sent[NET_MAX_DESPAWN_PER_PACKET];
+		netDespawn got[NET_MAX_DESPAWN_PER_PACKET];
+		unsigned char payload[NET_MAX_PAYLOAD];
+		int bytes,count;
+
+		for(int i = 0; i < NET_MAX_DESPAWN_PER_PACKET; i ++){
+			sent[i].entity_id = (unsigned short)(1000 - i);
+			sent[i].reason = NET_DESPAWN_EXPIRED;
+			}
+
+		bytes = net_despawn_pack(payload,sizeof(payload),sent,NET_MAX_DESPAWN_PER_PACKET);
+
+		if(bytes != (int)sizeof(netDespawnHeader)
+			   + NET_MAX_DESPAWN_PER_PACKET * (int)sizeof(netDespawn)){
+			net_logf(f,"FAIL despawn: %d bytes, expected %d",bytes,
+				(int)sizeof(netDespawnHeader)
+				+ NET_MAX_DESPAWN_PER_PACKET * (int)sizeof(netDespawn));
+			ok = 0;
+			}
+
+		count = net_despawn_unpack(got,NET_MAX_DESPAWN_PER_PACKET,payload,bytes);
+
+		if(count != NET_MAX_DESPAWN_PER_PACKET){
+			net_logf(f,"FAIL despawn: %d of %d ids",count,NET_MAX_DESPAWN_PER_PACKET);
+			ok = 0;
+			}
+		else {
+			for(int i = 0; i < NET_MAX_DESPAWN_PER_PACKET; i ++)
+				if(memcmp(&sent[i],&got[i],sizeof(netDespawn))){
+					net_logf(f,"FAIL despawn id %d differs after round trip",i);
+					ok = 0;
+					}
+			}
+
+		if(net_despawn_unpack(got,NET_MAX_DESPAWN_PER_PACKET,payload,1) != 0){
+			net_logf(f,"FAIL despawn: empty payload accepted");
+			ok = 0;
+			}
+		}
+
+	net_logf(f,"spawn: entity %u bytes, model id carried verbatim, batch %d entities",
+		(unsigned)sizeof(netSpawn),NET_MAX_SPAWN_PER_PACKET);
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -770,6 +1002,7 @@ int net_selftest(void)
 	int got_input = 0;
 	int got_lobby = 0;
 	int got_snapshot = 0;
+	int got_spawn = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -949,12 +1182,16 @@ int net_selftest(void)
 	net_logf(f,"keepalive PINGs seen by host: %d",keepalives);
 	net_logf(f,"burst sent %d, received %d, gaps %d",burst_sent,burst_recv,burst_gaps);
 
-	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && host_reliable == 1 &&
+	got_spawn = net_test_spawn(f);
+	if(!got_spawn)
+		net_logf(f,"FAIL net_test_spawn");
+
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && got_spawn && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d spawn=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot,got_spawn);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

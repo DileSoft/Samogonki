@@ -91,14 +91,18 @@ set(GAME_SOURCES
     RUNTIME/mechosoma.cpp
     RUNTIME/mechosoma.h
     RUNTIME/net_input.h
+    RUNTIME/net_fx.cpp
+    RUNTIME/net_fx.h
     RUNTIME/net_game.cpp
     RUNTIME/net_match.h
     RUNTIME/net_match.cpp
     RUNTIME/net_protocol.h
     RUNTIME/net_protocol_types.h
     RUNTIME/net_selftest.cpp
+    RUNTIME/net_snapshot.h
     RUNTIME/net_socket.h
     RUNTIME/net_socket.cpp
+    RUNTIME/net_spawn.h
     RUNTIME/net_transport.h
     RUNTIME/net_transport.cpp
     RUNTIME/og_buffer.cpp

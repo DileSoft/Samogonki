@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "BodyDispatcher.h"
+#include "net_fx.h"
 #include "Mechos.h"
 #include "SimpleClip.h"
 #include "Params.h"
@@ -106,6 +107,11 @@ void BodyDispatcher::attachBody(Body* body)
 	body -> post_quant(); 
 	if(body -> hidden())
 		body -> unhide();
+
+	// Last, so that whatever post_quant just did to the body's pose is the
+	// pose the wire carries. Host only, and a no-op outside a net game: see
+	// net_fx.h for what travels and what does not.
+	net_fx_attach(body);
 }
 
 void BodyDispatcher::killBody(Body* body) 

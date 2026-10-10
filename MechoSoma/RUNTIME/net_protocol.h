@@ -391,6 +391,34 @@ struct netSpawn
 // model_id must be the resolved id, never the noise range: fxlabCreateBolide
 // rolls the model as model + fxlabServerRND.RND(noise) on the host side.
 
+// NET_MSG_SPAWN, batched. One arcane cast makes several bodies at once - a
+// splinter burst is seven - and one datagram per body would be one datagram
+// per model for the whole match.
+struct netSpawnHeader
+{
+	unsigned int server_tick;
+	unsigned char count;
+};
+
+// Batched up to this many. A full race with every arcane firing is already
+// past the point where fifteen projectiles in one tick is conspicuous, and a
+// datagram that holds more would start being a reason to fragment.
+const int NET_MAX_SPAWN_PER_PACKET	= 15;
+const int NET_MAX_DESPAWN_PER_PACKET	= 15;
+
+// Upper bound on live replicated entities on the host. Deliberately larger
+// than one batch: a body that dies despawns on the next tick, but a body that
+// never dies has to still be tracked, and refusing to track is better than
+// running past the end of the array.
+const int NET_MAX_ENTITIES		= 256;
+
+// NET_MSG_DESPAWN, batched. Nothing carries a timestamp: a despawn is
+// already late when it is sent, and its only content is which body went away.
+struct netDespawnHeader
+{
+	unsigned char count;
+};
+
 // NET_MSG_DESPAWN
 enum netDespawnReason
 {
@@ -448,6 +476,13 @@ const int NET_Q_ANGLE		= 64;		// pitch, roll: +/-PI/2 -> +/-101
 const int NET_Q_SPEED_XY	= 64;		// vel_x, vel_y: +/-512 -> +/-32768
 const int NET_Q_SPEED_Z	= 32;		// vel_z: +/-64 -> +/-2048
 const int NET_Q_SPEED		= 64;		// on screen speed: 0..1024 -> 65536
+
+// Spawn positions are the one place a whole world coordinate is signed rather
+// than folded: a projectile is born wherever the caster is, which can be
+// outside the folded range for a moment before the world wraps it. Signed
+// shorts at this scale cover +-8192, far past any track, and the residual
+// error is a quarter of a unit - well under the size of the body itself.
+const int NET_Q_SPAWN_POS	= 4;
 
 #pragma pack(pop)
 
