@@ -1453,6 +1453,36 @@ int acsQuant(void)
 
 	while(KeyBuf -> size){
 		k = KeyBuf -> get();
+
+		/*
+			Hardcoded online entry.
+
+			The multiplayer screen lives in iscreen.scb, and that data cannot
+			be rebuilt from the repository's .SCR right now - the two no longer
+			match (see the plan, phase 6) - so the Online row cannot be added to
+			the screen itself yet. Until it can, the two network entry points
+			live here: on the multiplayer screen, F2 hosts and F3 joins.
+
+			Returning 2 is the script's $MCH_SINGLE_GAME, which is the mode a
+			net race rides; MainMenuRTO turns that into MCH_SINGLE_GAME and
+			GameQuantRTO sees mchNetGame and starts a session. For a client the
+			address is whatever -netjoin already put in mchNetJoinAddr, or the
+			127.0.0.1 default.
+		*/
+		if(acsScrD -> curScrID == ACS_MULTIPLAYER_SCR && (k == VK_F2 || k == VK_F3)){
+			mchNetGame = 1;
+			mchNetHost = (k == VK_F2);
+
+			// What ACS_EXT_SET_GAME_MODE would have cleared for a non
+			// hot-seat mode, since this path skips it.
+			mchSplitScreenGame = 0;
+			mchTurnBasedGame = 0;
+
+			acsScrD -> QuantCode = 2;
+			acsScrD -> flags |= ACS_NEED_EXIT;
+			continue;
+			}
+
 		acsScrD -> KeyTrap(k);
 	}
 
