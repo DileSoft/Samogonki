@@ -58,7 +58,11 @@ const int NET_FRAG_TIMEOUT_MS		= 2000;
 
 const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 
-const unsigned int NET_PROTO_VERSION	= 1;
+// Version 2 added the arcane mana fields to netRacerState: the host is the
+// only machine that drains an arcane's Power, so a client that wants a
+// truthful bar has to be told. A version 1 peer is refused in the handshake
+// rather than read with the old layout.
+const unsigned int NET_PROTO_VERSION	= 2;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -241,7 +245,7 @@ struct netKick
 
 /* ------------------------------- SNAPSHOTS ------------------------------- */
 
-// One racer, 50 bytes. Positions wrap around the world, the engine world is
+// One racer, 52 bytes. Positions wrap around the world, the engine world is
 // toroidal (GlobalWorldSize, 2048 by default) so a 16 bit value is exact
 // enough and survives crossing the border for free.
 struct netRacerState
@@ -271,7 +275,13 @@ struct netRacerState
 	unsigned char features[3];	// Mechos::features_, 22 bits
 	unsigned char part_kind[NET_ACTIVE_PARTS];
 	unsigned char part_arcane[NET_ACTIVE_PARTS];
+
+	// Per part arcane state, indexed the same way as the part's own
+	// part_by_index(). Power is Power/MaxPower scaled to 0..255 (see
+	// net_q_mana); Status is mchArcaneData::Status, which is what the client
+	// checks before it lets a keypress become a spell.
 	unsigned char part_power[NET_ACTIVE_PARTS];
+	unsigned char part_status[NET_ACTIVE_PARTS];
 
 	unsigned char lap;
 	unsigned char checkpoint;

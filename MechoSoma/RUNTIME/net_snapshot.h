@@ -112,6 +112,34 @@ inline float net_uq_speed(signed short v)
 }
 
 /*
+	Arcane mana, as a fraction of the arcane's own MaxPower rather than an
+	absolute number. MaxPower comes from the arcane's data and is not
+	guaranteed to be 100, but both machines build the car from the same data,
+	so the fraction means the same thing on both sides. Eight bits is far
+	finer than a bar on screen can show.
+
+	The host is the only machine whose arcane drains: a client's copy never
+	runs the process that spends Power, so without this every client bar
+	would sit full and every spell would look ready.
+*/
+inline unsigned char net_q_mana(float power,float maxpower)
+{
+	if(maxpower <= 0.0f) return 0;
+
+	float f = power / maxpower;
+
+	if(f < 0.0f) f = 0.0f;
+	if(f > 1.0f) f = 1.0f;
+
+	return (unsigned char)(f * 255.0f + 0.5f);
+}
+
+inline float net_uq_mana(unsigned char q,float maxpower)
+{
+	return maxpower * (float)q / 255.0f;
+}
+
+/*
 	Encode a whole snapshot. Returns the number of bytes written, or 0 if it
 	would not fit in one datagram.
 

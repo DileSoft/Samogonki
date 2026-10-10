@@ -152,6 +152,19 @@ static void net_send_snapshot(void)
 			s -> vel_z = (signed char)mr -> Vglobal().z;
 
 			s -> speed = (unsigned short)mr -> Vglobal().norm();
+
+			// Arcane mana per part. The host is the only machine whose arcane
+			// drains, so this is what both a client bar and a client's own
+			// cast check have to read.
+			for(int i = 0; i < NET_ACTIVE_PARTS; i ++){
+				cMesh* part = mr -> part_by_index(i);
+
+				if(!part) continue;
+
+				s -> part_power[i] = net_q_mana(part -> arcaneData.Power,
+								part -> arcaneData.MaxPower);
+				s -> part_status[i] = (unsigned char)(part -> arcaneData.Status ? 1 : 0);
+				}
 			}
 
 		s -> slot = (unsigned char)count;
@@ -173,13 +186,14 @@ static void net_send_snapshot(void)
 /*
 	Client side: put the host's view of a racer onto the local copy.
 
-	The local racer is skipped. It is driven by local input and simulated
-	locally, which is what keeps it responsive; overwriting it with a value
-	that has been across the network would add a round trip of lag to the
-	player's own car.
+	Pose goes only to the other machines. The local racer is driven by local
+	input and simulated locally, which is what keeps it responsive;
+	overwriting it with a value that has been across the network would add a
+	round trip of lag to the player's own car.
 
-	Remote racers are pose-driven from here on: they have no AI and no input,
-	so the physics runs on from wherever the last snapshot put them.
+	Arcane state goes to everyone, the local car included - see the note in
+	the loop. Remote racers are pose-driven from here on: they have no AI and
+	no input, so the physics runs on from wherever the last snapshot put them.
 */
 static void net_apply_snapshot(const void* data,unsigned int len)
 {
@@ -198,11 +212,31 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		mchRacer* rp = mch_raceD -> racerLst -> search(racers[i].slot);
 		mchMechosRacer* mr;
 
-		if(!rp || racers[i].slot == local) continue;
+		if(!rp) continue;
 
 		mr = dynamic_cast<mchMechosRacer*>(rp);
 
 		if(!mr) continue;
+
+		/*
+			Arcane state goes to every racer, the local one included. A
+			client never runs the arcane process - mchArcaneData::fxlabStart()
+			returns at the net hook - so its own Power only charges and its
+			Status never clears. The host's numbers are the true ones, and a
+			keypress on this machine reads exactly these fields before it lets
+			a spell out.
+		*/
+		for(int p = 0; p < NET_ACTIVE_PARTS; p ++){
+			cMesh* part = mr -> part_by_index(p);
+
+			if(!part) continue;
+
+			part -> arcaneData.Status = racers[i].part_status[p] ? 1 : 0;
+			part -> arcaneData.Power = net_uq_mana(racers[i].part_power[p],
+							       part -> arcaneData.MaxPower);
+			}
+
+		if(racers[i].slot == local) continue;
 
 		mr -> setPosition(Vect3f(net_uq_world(racers[i].pos_x),
 					 net_uq_world(racers[i].pos_y),

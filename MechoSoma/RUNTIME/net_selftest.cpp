@@ -565,8 +565,8 @@ static int net_test_snapshot(FILE* f)
 {
 	int ok = 1;
 
-	if(sizeof(netRacerState) != 48){
-		net_logf(f,"FAIL sizeof(netRacerState) = %u, expected 48",sizeof(netRacerState));
+	if(sizeof(netRacerState) != 52){
+		net_logf(f,"FAIL sizeof(netRacerState) = %u, expected 52",sizeof(netRacerState));
 		ok = 0;
 		}
 
@@ -643,6 +643,38 @@ static int net_test_snapshot(FILE* f)
 			}
 		}
 
+	// Mana: the fraction round trips, the walk past the ends clamps instead of
+	// wrapping, and a zero MaxPower - what a part with no arcane reports -
+	// never divides by it.
+	{
+		const float maxp = 100.0f;
+		float worst = 0;
+
+		for(int i = 0; i <= 1000; i ++){
+			float p = maxp * (float)i / 1000.0f;
+			float back = net_uq_mana(net_q_mana(p,maxp),maxp);
+
+			if(fabs(back - p) > worst) worst = fabs(back - p);
+			}
+
+		// The step is maxp/255, so half of it is the most rounding can cost.
+		if(worst > maxp / 255.0f){
+			net_logf(f,"FAIL mana quantization error %.6f",worst);
+			ok = 0;
+			}
+
+		if(net_q_mana(-5.0f,maxp) != 0 || net_q_mana(200.0f,maxp) != 255){
+			net_logf(f,"FAIL mana clamp: %u / %u",
+				(unsigned)net_q_mana(-5.0f,maxp),(unsigned)net_q_mana(200.0f,maxp));
+			ok = 0;
+			}
+
+		if(net_q_mana(50.0f,0.0f) != 0){
+			net_logf(f,"FAIL mana with zero maxpower did not return 0");
+			ok = 0;
+			}
+		}
+
 	// Pack and unpack a full grid, values intact.
 	{
 		netRacerState sent[NET_MAX_PLAYERS];
@@ -675,6 +707,7 @@ static int net_test_snapshot(FILE* f)
 			sent[i].part_kind[0] = (unsigned char)(i + 1);
 			sent[i].part_arcane[0] = (unsigned char)(40 + i);
 			sent[i].part_power[0] = (unsigned char)(50 + i);
+			sent[i].part_status[0] = (unsigned char)(60 + i);
 			sent[i].lap = (unsigned char)i;
 			sent[i].checkpoint = (unsigned char)(i * 2);
 			sent[i].place = (unsigned char)(i + 1);
