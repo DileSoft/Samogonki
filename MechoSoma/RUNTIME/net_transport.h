@@ -90,6 +90,10 @@ public:
 
 	int send(int peer_id,int type,const void* data,unsigned int len,int reliable = 0);
 
+	// Same to every peer that can be addressed: the local record and any peer
+	// never heard from are skipped. Returns how many peers it reached.
+	int broadcast(int type,const void* data,unsigned int len,int reliable = 0);
+
 	// Pops one datagram from the inbox. Returns 0 when nothing is pending.
 	// *seq receives the sender's packet sequence number, which the game layer
 	// uses to drop duplicates of discrete events out of band from the

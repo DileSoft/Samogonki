@@ -450,6 +450,30 @@ int netSession::send(int peer_id,int type,const void* data,unsigned int len,int 
 	return raw_send(ep -> addr,type,0,ep -> sendSeq ++,ep -> recvSeq,data,len);
 }
 
+int netSession::broadcast(int type,const void* data,unsigned int len,int reliable)
+{
+	netEndpoint* ep = _peers -> first();
+	netEndpoint* nxt;
+	int sent = 0;
+
+	// The list is walked with the next link captured up front: queue_reliable
+	// is free to touch the queue of the peer being sent to, and it must not
+	// turn into walking a list that just changed shape.
+	while(ep){
+		nxt = (netEndpoint*)ep -> next;
+
+		// The local record exists so the code can find the bound address, and
+		// a peer that has never been heard from has no address to reach yet.
+		// Sending to either is how a roster ends up in a black hole.
+		if(!ep -> is_host && ep -> hasAddr && send(ep -> id,type,data,len,reliable))
+			sent ++;
+
+		ep = nxt;
+	}
+
+	return sent;
+}
+
 void netSession::ack_peer(netEndpoint* ep,unsigned short seq)
 {
 	netOutgoing* out = ep -> outLst -> first();

@@ -90,6 +90,9 @@ set(GAME_SOURCES
     RUNTIME/mch_rto.H
     RUNTIME/mechosoma.cpp
     RUNTIME/mechosoma.h
+    RUNTIME/net_input.h
+    RUNTIME/net_match.h
+    RUNTIME/net_match.cpp
     RUNTIME/net_protocol.h
     RUNTIME/net_protocol_types.h
     RUNTIME/net_selftest.cpp

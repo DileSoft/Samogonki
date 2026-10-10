@@ -5,6 +5,7 @@
 #include "net_socket.h"
 #include "net_transport.h"
 #include "net_input.h"
+#include "net_match.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -78,6 +79,318 @@ static int net_reliable_left(netSession* s)
 	}
 
 	return left;
+}
+
+/*
+	Lobby and match test: one host and several clients, all in one process.
+
+	This is the part that proves the match layer agrees with itself, which
+	the transport test cannot show. What is being checked is not that the
+	network works but that the protocol does:
+
+	  - every client ends up in a distinct slot, and the name the host
+	    stores for that slot is the name the client actually sent;
+	  - readiness propagates both ways;
+	  - after the start handshake every client holds the *same* absolute
+	    start tick, which is the whole point of the two step handshake;
+	  - input samples reach the host under the right slot with the values
+	    they were packed with;
+	  - a client arriving at a full race is refused rather than seated.
+
+	Four clients plus the host is HS_PLAYERS_MAX, so the fifth is the refusal
+	case.
+*/
+static int net_test_lobby(FILE* f)
+{
+	const int NUM_CLIENTS = 4;
+	const int max_ms = 12000;
+	const char* names[4] = { "vanya","mitya","kostya","lesha" };
+
+	const int PHASE_WELCOME = 0;
+	const int PHASE_READY = 1;
+	const int PHASE_START = 2;
+	const int PHASE_INPUT = 3;
+	const int PHASE_CHECK = 4;
+
+	netSession* host = new netSession;
+	netMatch*   hmatch = new netMatch(host);
+
+	netSession* cl[8];
+	netMatch*   cm[8];
+	netSession* fifth = new netSession;
+	netMatch*   fifth_match = new netMatch(fifth);
+
+	int ok = 1;
+	int phase = PHASE_WELCOME;
+	unsigned int phase_ms = 0;
+	unsigned int t0 = clocki();
+	unsigned short host_port = 0;
+	unsigned int common_tick = 0;
+	int input_check = 1;
+
+	for(int i = 0; i < 8; i ++){ cl[i] = NULL; cm[i] = NULL; }
+
+	if(!host -> open(0)){
+		net_logf(f,"FAIL lobby: host -> open: %s",host -> status());
+		ok = 0;
+		}
+	else {
+		netEndpoint* self = host -> get_peer(0);
+
+		host -> host();
+		hmatch -> open_host("hostishka",1,2,3);
+
+		if(self && self -> hasAddr)
+			host_port = self -> addr.port;
+		else {
+			net_logf(f,"FAIL lobby: host -> local address");
+			ok = 0;
+			}
+		}
+
+	if(ok){
+		for(int i = 0; i < NUM_CLIENTS; i ++){
+			cl[i] = new netSession;
+
+			if(!cl[i] -> open(0) || !cl[i] -> connect("127.0.0.1",host_port)){
+				net_logf(f,"FAIL lobby: client %d -> open/connect: %s",i,cl[i] -> status());
+				ok = 0;
+				break;
+				}
+
+			cm[i] = new netMatch(cl[i]);
+			cm[i] -> open_client(names[i]);
+			}
+		}
+
+	// Arrives last, at a race that is already full.
+	if(ok){
+		fifth -> open(0);
+		fifth -> connect("127.0.0.1",host_port);
+		fifth_match -> open_client("greedy");
+		}
+
+	if(ok){
+		while(clocki() - t0 < (unsigned int)max_ms && phase != PHASE_CHECK){
+			unsigned int now = clocki();
+
+			if(phase_ms == 0) phase_ms = now;
+
+			host -> quant();
+			hmatch -> quant();
+
+			for(int i = 0; i < NUM_CLIENTS; i ++){
+				if(!cl[i]) continue;
+				cl[i] -> quant();
+				cm[i] -> quant();
+				}
+
+			fifth -> quant();
+			fifth_match -> quant();
+
+			// --- phase transitions ---
+
+			if(phase == PHASE_WELCOME && now - phase_ms > 400){
+				int all_welcomed = 1;
+				int slot_seen[NET_MAX_PLAYERS];
+
+				for(int i = 0; i < NET_MAX_PLAYERS; i ++) slot_seen[i] = 0;
+
+				for(int i = 0; i < NUM_CLIENTS; i ++){
+					int slot = cm[i] -> local_slot();
+
+					if(slot < 0){ all_welcomed = 0; continue; }
+
+					if(slot_seen[slot]){
+						net_logf(f,"FAIL lobby: slots %d handed out twice",slot);
+						ok = 0;
+						}
+
+					slot_seen[slot] = 1;
+
+					const netMatchPlayer& p = hmatch -> player(slot);
+
+					if(!p.is_present){
+						net_logf(f,"FAIL lobby: slot %d not present on host",slot);
+						ok = 0;
+						}
+
+					if(strcmp(p.name,names[i])){
+						net_logf(f,"FAIL lobby: slot %d holds \"%s\", client %d sent \"%s\"",
+							slot,p.name,i,names[i]);
+						ok = 0;
+						}
+					}
+
+				// A full race, which is also what the fifth client runs into.
+				if(hmatch -> num_players() != NET_MAX_PLAYERS){
+					net_logf(f,"FAIL lobby: host sees %d players, expected %d",
+						hmatch -> num_players(),NET_MAX_PLAYERS);
+					ok = 0;
+					}
+
+				if(fifth_match -> state() != NET_MATCH_KICKED){
+					net_logf(f,"FAIL lobby: fifth client state %d, expected KICKED (%d)",
+						fifth_match -> state(),NET_MATCH_KICKED);
+					ok = 0;
+					}
+				else net_logf(f,"lobby: fifth client refused with \"%s\"",fifth_match -> status());
+
+				if(all_welcomed){
+					net_logf(f,"lobby: %d of %d slots seated, names match",
+						hmatch -> num_players(),NET_MAX_PLAYERS);
+					phase = PHASE_READY;
+					phase_ms = 0;
+					}
+				else if(now - phase_ms > 2000){
+					net_logf(f,"FAIL lobby: not everybody was seated in time");
+					ok = 0;
+					phase = PHASE_CHECK;
+					}
+				}
+
+			if(phase == PHASE_READY){
+				for(int i = 0; i < NUM_CLIENTS; i ++)
+					cm[i] -> set_ready(1);
+
+				phase = PHASE_START;
+				phase_ms = 0;
+				}
+
+			if(phase == PHASE_START){
+				// Wait for the acknowledgements to land, then take the human
+				// decision to begin. The host tick must not move until this
+				// point, so the number checked below is really shared.
+				if(now - phase_ms > 300){
+					hmatch -> force_start();
+					phase_ms = now;
+					phase = PHASE_INPUT;
+
+					// Hold the tick the host is about to promise. Every
+					// client has to report the same value, and the host's
+					// tick only advances through quant().
+					common_tick = hmatch -> tick();
+					}
+				}
+
+			if(phase == PHASE_INPUT){
+				static const signed char traction[4] = { -120, 40, 90, -60 };
+				static const signed char rudder[4]   = { 100, -30, 60, 120 };
+
+				if(now - phase_ms > 100 && hmatch -> state() != NET_MATCH_RUNNING)
+					phase_ms = now;		// still starting, keep waiting
+
+				if(hmatch -> state() == NET_MATCH_RUNNING){
+					unsigned char payload[NET_MAX_PAYLOAD];
+					int all_running = 1;
+
+					// The tick the host actually promised, not the one it
+					// happened to be on when the decision was taken.
+					common_tick = hmatch -> start_tick();
+
+					for(int i = 0; i < NUM_CLIENTS; i ++){
+						netInput in;
+						int slot = cm[i] -> local_slot();
+						int bytes;
+
+						// Input waits for the race to be on, exactly as it
+						// does in the game: samples sent before the host
+						// is running are simply not recorded.
+						memset(&in,0,sizeof(in));
+						in.tick = hmatch -> tick() + (unsigned int)i;
+						in.traction = traction[i];
+						in.rudder = rudder[i];
+						in.buttons = (i == 2) ? NET_BTN_HORN : 0;
+
+						bytes = cm[i] -> build_input(payload,sizeof(payload),in);
+						if(bytes <= 0 || !cm[i] -> send_input(payload,bytes))
+							all_running = 0;
+
+						if(cm[i] -> state() != NET_MATCH_RUNNING)
+							all_running = 0;
+
+						if(cm[i] -> start_tick() != common_tick){
+							net_logf(f,"FAIL lobby: client %d start tick %u, host promised %u",
+								i,cm[i] -> start_tick(),common_tick);
+							ok = 0;
+							all_running = 0;
+							}
+						}
+
+					if(all_running){
+						phase = PHASE_CHECK;
+						phase_ms = 0;
+						}
+					}
+				}
+
+			netSleep(1);
+			}
+
+		// --- final checks, after the loop so the last packets landed ---
+
+		if(phase != PHASE_CHECK){
+			net_logf(f,"FAIL lobby: test stalled at phase %d, host state %d",phase,hmatch -> state());
+			ok = 0;
+			}
+		else {
+			netSleep(200);
+
+			for(int i = 0; i < NUM_CLIENTS; i ++){
+				cl[i] -> quant();
+				cm[i] -> quant();
+				}
+
+			host -> quant();
+			hmatch -> quant();
+			}
+
+		for(int i = 0; i < NUM_CLIENTS; i ++){
+			if(!cl[i]) continue;
+
+			cl[i] -> quant();
+			cm[i] -> quant();
+
+			int slot = cm[i] -> local_slot();
+			netInput got;
+
+			if(slot < 0 || !hmatch -> get_input(slot,&got)){
+				net_logf(f,"FAIL lobby: no input recorded for slot %d",slot);
+				input_check = 0;
+				ok = 0;
+				continue;
+				}
+
+			if(got.traction != (signed char)(i == 0 ? -120 : (i == 1 ? 40 : (i == 2 ? 90 : -60))) ||
+			   got.rudder != (signed char)(i == 0 ? 100 : (i == 1 ? -30 : (i == 2 ? 60 : 120)))){
+				net_logf(f,"FAIL lobby: slot %d input traction %d rudder %d",
+					slot,(int)got.traction,(int)got.rudder);
+				input_check = 0;
+				ok = 0;
+				}
+			}
+
+		if(input_check)
+			net_logf(f,"lobby: input routed to every slot intact");
+		}
+
+	net_logf(f,"lobby: host state %d, players %d, ready %d, start tick %u",
+		hmatch -> state(),hmatch -> num_players(),hmatch -> num_ready(),hmatch -> start_tick());
+
+	for(int i = 0; i < NUM_CLIENTS; i ++){
+		if(cl[i]){ cl[i] -> close(); delete cl[i]; }
+		if(cm[i]) delete cm[i];
+		}
+
+	if(fifth) fifth -> close();
+	if(host) host -> close();
+
+	delete host;
+	delete hmatch;
+	delete fifth;
+	delete fifth_match;
+
+	return ok;
 }
 
 /*
@@ -255,6 +568,7 @@ int net_selftest(void)
 	int got_welcome = 0;
 	int got_fragment = 0;
 	int got_input = 0;
+	int got_lobby = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -275,6 +589,11 @@ int net_selftest(void)
 	got_input = net_test_input(f);
 	if(!got_input)
 		net_logf(f,"FAIL net_test_input");
+
+	got_lobby = net_test_lobby(f);
+	if(!got_lobby)
+		net_logf(f,"FAIL net_test_lobby");
+
 
 	for(int i = 0; i < big_size; i ++)
 		big_buf[i] = (unsigned char)(i * 31 + 7);
@@ -429,8 +748,8 @@ int net_selftest(void)
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d",
-		got_welcome,host_reliable,got_fragment,got_input);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

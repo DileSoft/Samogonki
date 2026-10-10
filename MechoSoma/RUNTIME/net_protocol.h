@@ -57,6 +57,23 @@ const int NET_RETRANSMIT_MAX			= 8;
 const int NET_PEER_TIMEOUT_MS		= 30000;
 const int NET_PING_PERIOD_MS		= 1000;
 
+// One simulation and network tick. netWelcome::tick_rate is this expressed
+// in hertz, so 1000 / NET_TICK_MS must stay equal to the tick_rate the host
+// advertises or the agreed start tick means different times to each side.
+const int NET_TICK_MS			= 50;
+const int NET_TICK_RATE_HZ		= 1000 / NET_TICK_MS;	// 20
+
+// How long after START_GAME the race actually begins. Padding, not tuning:
+// it has to cover one retransmit plus a slow frame on the slowest machine.
+const int NET_START_DELAY_MS		= 1500;
+
+// Roster is rebroadcast on change and on this heartbeat, so a peer that
+// misses one still catches the next and late arrivals are not invisible.
+const int NET_ROSTER_MS			= 500;
+
+// Slots: 0 is the host and is never a peer.
+const int NET_SLOT_HOST			= 0;
+
 /* ---------------------------- MESSAGE TYPES ------------------------------ */
 
 enum netMessageTypes
@@ -177,6 +194,11 @@ enum netRosterStates
 };
 
 // NET_MSG_START_GAME - every peer switches to racing on start_tick.
+// start_tick == 0 together with NET_START_PREPARE means "the start is coming,
+// acknowledge": the host commits to the tick only once every peer has the
+// message in its inbox. See the note at the top of net_match.cpp.
+#define NET_START_PREPARE		0x01
+
 struct netStartGame
 {
 	unsigned int start_tick;
@@ -185,6 +207,7 @@ struct netStartGame
 	unsigned char track_id;
 	unsigned char laps;
 	unsigned char bots_mask;
+	unsigned char flags;
 	unsigned char racer_kind[NET_MAX_PLAYERS];
 };
 
