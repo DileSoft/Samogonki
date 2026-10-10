@@ -16,6 +16,17 @@
 
 #include "net_protocol_types.h"
 
+/*
+	Everything below is a wire struct and is copied as bytes, not field by
+	field. Without explicit packing the compiler inserts padding both to pad
+	the struct out and into the middle of it, and memcpy then ships the
+	padding along: the sizes stop matching what a reader of this file would
+	expect, and the padding bytes themselves differ between two builds of the
+	same code. The transport test asserts these sizes for exactly that
+	reason.
+*/
+#pragma pack(push,1)
+
 /* ------------------------------ FRAMING ---------------------------------- */
 
 // Fixed per datagram header, payload follows immediately.
@@ -437,5 +448,7 @@ const int NET_Q_ANGLE		= 64;		// pitch, roll: +/-PI/2 -> +/-101
 const int NET_Q_SPEED_XY	= 64;		// vel_x, vel_y: +/-512 -> +/-32768
 const int NET_Q_SPEED_Z	= 32;		// vel_z: +/-64 -> +/-2048
 const int NET_Q_SPEED		= 64;		// on screen speed: 0..1024 -> 65536
+
+#pragma pack(pop)
 
 #endif /* __NET_PROTOCOL_H__ */

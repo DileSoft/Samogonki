@@ -50,6 +50,9 @@ netMatch::netMatch(netSession* sess) : _sess(sess)
 	_last_roster_ms = 0;
 	_roster_dirty = 0;
 
+	_handler = NULL;
+	_user = NULL;
+
 	_status[0] = 0;
 
 	for(int i = 0; i < NET_MAX_PLAYERS; i ++){
@@ -263,7 +266,7 @@ int netMatch::ms_until_start(void) const
 	return (int)(_start_time_ms - (unsigned int)clocki());
 }
 
-void netMatch::handle_client_message(int type,const void* data,unsigned int len)
+int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 {
 	switch(type){
 		case NET_MSG_WELCOME:{
@@ -271,7 +274,7 @@ void netMatch::handle_client_message(int type,const void* data,unsigned int len)
 
 			if(len < sizeof(netWelcome)){
 				set_status("Bad welcome");
-				return;
+				return 1;
 				}
 
 			_local_slot = w -> your_slot;
@@ -293,7 +296,7 @@ void netMatch::handle_client_message(int type,const void* data,unsigned int len)
 			const unsigned char* buf = (const unsigned char*)data;
 			int off = sizeof(netRosterHeader);
 
-			if(len < (unsigned int)sizeof(netRosterHeader)) return;
+			if(len < (unsigned int)sizeof(netRosterHeader)) return 1;
 
 			reset_roster();
 
@@ -322,13 +325,13 @@ void netMatch::handle_client_message(int type,const void* data,unsigned int len)
 			if(_local_slot >= 0 && _local_slot < NET_MAX_PLAYERS)
 				_players[_local_slot].is_present = 1;
 
-			break;
+			return 1;
 			}
 
 		case NET_MSG_START_GAME:{
 			const netStartGame* sg = (const netStartGame*)data;
 
-			if(len < sizeof(netStartGame)) return;
+			if(len < sizeof(netStartGame)) return 1;
 
 			// Step one of the handshake: acknowledge so the host knows the
 			// message is safely in our inbox before it commits to a tick.
@@ -346,7 +349,7 @@ void netMatch::handle_client_message(int type,const void* data,unsigned int len)
 					}
 
 				set_status("Starting");
-				return;
+				return 1;
 				}
 
 			// Step two: the tick is final.
@@ -359,7 +362,7 @@ void netMatch::handle_client_message(int type,const void* data,unsigned int len)
 			_laps = sg -> laps;
 
 			set_status("Racing");
-			break;
+			return 1;
 			}
 
 		case NET_MSG_KICK:{
@@ -376,9 +379,13 @@ void netMatch::handle_client_message(int type,const void* data,unsigned int len)
 				}
 			else set_status("Kicked");
 
-			break;
+			return 1;
 			}
 		}
+
+	// Anything else is not the match layer's business: snapshots and events
+	// belong to the game, and the handler set with set_handler() sees them.
+	return 0;
 	}
 
 /* -------------------------------- HOST ---------------------------------- */
@@ -525,7 +532,7 @@ void netMatch::free_lost_slots(void)
 		}
 	}
 
-void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigned int len,unsigned short seq)
+int netMatch::handle_host_message(int peer_id,int type,const void* data,unsigned int len,unsigned short seq)
 {
 	(void)seq;
 
@@ -534,16 +541,16 @@ void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigne
 			const netHello* h = (const netHello*)data;
 			netEndpoint* ep = _sess -> get_peer(peer_id);
 
-			if(!ep) return;
+			if(!ep) return 1;
 
 			if(!h || len < sizeof(netHello)){
 				kick(peer_id,NET_KICK_BAD_VERSION,"Bad hello");
-				return;
+				return 1;
 				}
 
 			if(h -> proto_version != NET_PROTO_VERSION){
 				kick(peer_id,NET_KICK_BAD_VERSION,"Wrong version");
-				return;
+				return 1;
 				}
 
 			if(ep -> slot < 0){
@@ -551,7 +558,7 @@ void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigne
 
 				if(slot < 0){
 					kick(peer_id,NET_KICK_ROOM_FULL,"Race is full");
-					return;
+					return 1;
 					}
 
 				ep -> slot = slot;
@@ -580,24 +587,24 @@ void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigne
 			_sess -> set_state(NET_STATE_LOBBY);
 			send_welcome(peer_id,ep -> slot);
 			send_roster(1);
-			break;
+			return 1;
 			}
 
 		case NET_MSG_READY:{
 			const netReady* r = (const netReady*)data;
 			int slot = slot_by_peer(peer_id);
 
-			if(!r || len < sizeof(netReady) || slot < 0) return;
+			if(!r || len < sizeof(netReady) || slot < 0) return 1;
 
 			// ready == 2 is the acknowledgement of a prepare START_GAME.
 			if(r -> ready == 2){
 				mark_ready(slot,1);
-				return;
+				return 1;
 				}
 
 			mark_ready(slot,r -> ready ? 1 : 0);
 			send_roster(1);
-			break;
+			return 1;
 			}
 
 		case NET_MSG_INPUT:{
@@ -605,7 +612,7 @@ void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigne
 			int slot = slot_by_peer(peer_id);
 			int got = net_input_unpack(samples,NET_INPUT_BATCH,(const unsigned char*)data,len);
 
-			if(slot < 0 || got <= 0) return;
+			if(slot < 0 || got <= 0) return 1;
 
 			for(int i = 0; i < got; i ++){
 				// Stale samples are dropped rather than replayed: a buffered
@@ -618,7 +625,7 @@ void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigne
 				_has_input[slot] = 1;
 				_players[slot].last_input_tick = samples[i].tick;
 				}
-			break;
+			return 1;
 			}
 
 		case NET_MSG_LEAVE:{
@@ -637,9 +644,12 @@ void netMatch::handle_host_message(int peer_id,int type,const void* data,unsigne
 
 				send_roster(1);
 				}
-			break;
+			return 1;
 			}
 		}
+
+	// Not a match message, so the game may want it.
+	return 0;
 	}
 
 void netMatch::quant(void)
@@ -661,10 +671,14 @@ void netMatch::quant(void)
 	/* ---------------------------- messages --------------------------- */
 
 	while(_sess -> receive(&peer_id,&type,buf,&len,&seq)){
-		if(_is_host)
-			handle_host_message(peer_id,type,buf,len,seq);
-		else
-			handle_client_message(type,buf,len);
+		int handled = _is_host
+			? handle_host_message(peer_id,type,buf,len,seq)
+			: handle_client_message(type,buf,len);
+
+		// Whatever the roster does not own is the game's: snapshots and
+		// events arrive as their own message types and mean nothing here.
+		if(!handled && _handler)
+			_handler(type,buf,len,_user);
 		}
 
 	/* ------------------------------- host ---------------------------- */

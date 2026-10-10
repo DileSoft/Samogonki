@@ -6,6 +6,7 @@
 #include "net_transport.h"
 #include "net_input.h"
 #include "net_match.h"
+#include "net_snapshot.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -547,6 +548,205 @@ static int net_test_input(FILE* f)
 	return ok;
 }
 
+/*
+	Snapshot codec test.
+
+	The wire carries 16 bit quantized values, so what is being pinned down is
+	that a vehicle comes out where it went in and facing the way it was
+	facing. The two cases worth naming are the map edge and the compass
+	seam: the world folds at NET_WORLD_SIZE and the heading wraps at 2*PI, and
+	getting either wrong shows up as a car teleporting across the track or an
+	interpolator taking the long way round the circle.
+*/
+static int net_test_snapshot(FILE* f)
+{
+	int ok = 1;
+
+	if(sizeof(netRacerState) != 48){
+		net_logf(f,"FAIL sizeof(netRacerState) = %u, expected 48",sizeof(netRacerState));
+		ok = 0;
+		}
+
+	// World position, including folding past the edge.
+	float worst_pos = 0;
+	for(int i = 0; i < 2000; i ++){
+		float x = (float)NET_WORLD_SIZE * (float)i / 2000.0f;
+		float back = net_uq_world(net_q_world(x));
+		float error = fabs(back - x);
+
+		if(error > worst_pos) worst_pos = error;
+		}
+
+	// The fold: a coordinate one world over must come back as the same place
+	// inside the world, not as a clamped far corner.
+	{
+		float x = 1234.5f;
+		float wrapped = net_uq_world(net_q_world(x + (float)NET_WORLD_SIZE));
+
+		if(fabs(wrapped - x) > 0.01f){
+			net_logf(f,"FAIL world fold: %.3f + world = %.3f",x,wrapped);
+			ok = 0;
+			}
+		}
+
+	if(worst_pos > 1.0f / (float)NET_Q_WORLD + 1e-4f){
+		net_logf(f,"FAIL world quantization error %.6f, tolerated %.6f",
+			worst_pos,1.0f / (float)NET_Q_WORLD);
+		ok = 0;
+		}
+
+	// Heading: round trip across the whole circle, and across the seam in
+	// particular. A 16 bit heading wraps by design, so the check is that the
+	// value just below 2*PI comes back just below 2*PI, not that exactly 2*PI
+	// maps back to itself: 2*PI is the seam, and it is the same place as 0.
+	{
+		float worst_yaw = 0;
+
+		for(int i = 0; i < 2000; i ++){
+			float a = 6.2831853f * (float)i / 2000.0f;
+			float back = net_uq_yaw(net_q_yaw(a));
+
+			if(fabs(back - a) > worst_yaw) worst_yaw = fabs(back - a);
+			}
+
+		if(worst_yaw > 0.001f){
+			net_logf(f,"FAIL yaw quantization error %.6f",worst_yaw);
+			ok = 0;
+			}
+
+		if(net_q_yaw(0.0f) != 0){
+			net_logf(f,"FAIL yaw zero encodes to %u, expected 0",(unsigned)net_q_yaw(0.0f));
+			ok = 0;
+			}
+		}
+
+	// Height, including the negative range.
+	{
+		float z = -512.5f;
+
+		if(fabs(net_uq_height(net_q_height(z)) - z) > 1.0f / (float)NET_Q_HEIGHT + 1e-4f){
+			net_logf(f,"FAIL height round trip: %.4f -> %.4f",z,net_uq_height(net_q_height(z)));
+			ok = 0;
+			}
+		}
+
+	// Speed clamps at the wire ends rather than wrapping into the opposite
+	// direction, which would send a fast car backwards.
+	{
+		if(net_q_speed(100000.0f) != 32767 || net_q_speed(-100000.0f) != -32768){
+			net_logf(f,"FAIL speed clamp: %d / %d",
+				(int)net_q_speed(100000.0f),(int)net_q_speed(-100000.0f));
+			ok = 0;
+			}
+		}
+
+	// Pack and unpack a full grid, values intact.
+	{
+		netRacerState sent[NET_MAX_PLAYERS];
+		netRacerState got[NET_MAX_PLAYERS];
+		netSnapshotHeader hdr;
+		unsigned char payload[NET_MAX_PAYLOAD];
+		int bytes,count;
+
+		for(int i = 0; i < NET_MAX_PLAYERS; i ++){
+			memset(&sent[i],0,sizeof(netRacerState));
+
+			sent[i].slot = (unsigned char)i;
+			sent[i].racer_id = (unsigned char)(10 + i);
+			sent[i].kind = (unsigned char)(20 + i);
+			sent[i].mech_state = (unsigned char)(i % 3);
+			sent[i].pos_x = net_q_world(512.0f + 60.0f * (float)i);
+			sent[i].pos_y = net_q_world(300.0f - 30.0f * (float)i);
+			sent[i].pos_z = net_q_height(10.0f * (float)i);
+			sent[i].yaw = net_q_yaw(1.0f + 0.3f * (float)i);
+			sent[i].pitch = (signed char)(i * 7);
+			sent[i].roll = (signed char)(i * -5);
+			sent[i].vel_x = net_q_speed(20.0f * (float)i);
+			sent[i].vel_y = net_q_speed(-10.0f * (float)i);
+			sent[i].vel_z = (signed char)(i - 2);
+			sent[i].ang_vel_z = (signed char)(i * 3);
+			sent[i].speed = (unsigned short)(1000 + i);
+			sent[i].energy = (unsigned char)(200 - i);
+			sent[i].flags = (unsigned short)(0x8000 | i);
+			sent[i].features[0] = (unsigned char)i;
+			sent[i].part_kind[0] = (unsigned char)(i + 1);
+			sent[i].part_arcane[0] = (unsigned char)(40 + i);
+			sent[i].part_power[0] = (unsigned char)(50 + i);
+			sent[i].lap = (unsigned char)i;
+			sent[i].checkpoint = (unsigned char)(i * 2);
+			sent[i].place = (unsigned char)(i + 1);
+			sent[i].time_ms = 1000u * (unsigned int)(i + 1);
+			sent[i].bonus_count = 0;
+			}
+
+		bytes = net_snapshot_pack(payload,sizeof(payload),12345,sent,NET_MAX_PLAYERS);
+		count = net_snapshot_unpack(&hdr,got,NET_MAX_PLAYERS,payload,bytes);
+
+		if(bytes != (int)sizeof(netSnapshotHeader) + NET_MAX_PLAYERS * (int)sizeof(netRacerState) ||
+		   count != NET_MAX_PLAYERS || hdr.server_tick != 12345){
+			net_logf(f,"FAIL snapshot batch: %d bytes, %d of %d racers, tick %u",
+				bytes,count,NET_MAX_PLAYERS,(unsigned)hdr.server_tick);
+			ok = 0;
+			}
+		else {
+			for(int i = 0; i < NET_MAX_PLAYERS; i ++)
+				if(memcmp(&sent[i],&got[i],sizeof(netRacerState))){
+					net_logf(f,"FAIL snapshot racer %d differs after round trip",i);
+					ok = 0;
+					}
+			}
+
+		// A payload lying about its count must be refused.
+		{
+			netRacerState small[1];
+			netRacerState many[NET_MAX_PLAYERS];
+			unsigned char forged[NET_MAX_PAYLOAD];
+			int got;
+
+			memset(forged,0,sizeof(forged));
+
+			// racer_count sits after the four byte server_tick, which is why
+			// this is written at offset 4 and not at 0.
+			forged[4] = (unsigned char)NET_MAX_PLAYERS;
+
+			// A one byte payload cannot hold a header, let alone a racer.
+			got = net_snapshot_unpack(&hdr,small,1,forged,1);
+			if(got != 0){
+				net_logf(f,"FAIL snapshot truncated: short payload accepted, %d racers",got);
+				ok = 0;
+				}
+
+			// The payload claims five racers and is long enough for five,
+			// but the caller can only hold one. Only one may be written.
+			got = net_snapshot_unpack(&hdr,small,1,forged,
+						  (int)sizeof(netSnapshotHeader) + NET_MAX_PLAYERS * (int)sizeof(netRacerState));
+			if(got != 1){
+				net_logf(f,"FAIL snapshot capacity clamp: claimed %d, capacity 1, got %d",
+					NET_MAX_PLAYERS,got);
+				ok = 0;
+				}
+
+			got = net_snapshot_unpack(&hdr,many,NET_MAX_PLAYERS,forged,
+						  (int)sizeof(netSnapshotHeader) + NET_MAX_PLAYERS * (int)sizeof(netRacerState) - 1);
+			if(got != 0){
+				net_logf(f,"FAIL snapshot short by one byte: accepted, %d racers",got);
+				ok = 0;
+				}
+			}
+
+		if(net_snapshot_pack(payload,sizeof(payload),1,sent,0) != 0){
+			net_logf(f,"FAIL snapshot: empty batch accepted");
+			ok = 0;
+			}
+		}
+
+	net_logf(f,"snapshot: world error %.6f, racer block %u bytes, batch %d bytes",
+		worst_pos,(unsigned)sizeof(netRacerState),
+		(int)sizeof(netSnapshotHeader) + NET_MAX_PLAYERS * (int)sizeof(netRacerState));
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -569,6 +769,7 @@ int net_selftest(void)
 	int got_fragment = 0;
 	int got_input = 0;
 	int got_lobby = 0;
+	int got_snapshot = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -593,6 +794,10 @@ int net_selftest(void)
 	got_lobby = net_test_lobby(f);
 	if(!got_lobby)
 		net_logf(f,"FAIL net_test_lobby");
+
+	got_snapshot = net_test_snapshot(f);
+	if(!got_snapshot)
+		net_logf(f,"FAIL net_test_snapshot");
 
 
 	for(int i = 0; i < big_size; i ++)
@@ -744,12 +949,12 @@ int net_selftest(void)
 	net_logf(f,"keepalive PINGs seen by host: %d",keepalives);
 	net_logf(f,"burst sent %d, received %d, gaps %d",burst_sent,burst_recv,burst_gaps);
 
-	ok = (got_welcome && got_fragment && got_input && host_reliable == 1 &&
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

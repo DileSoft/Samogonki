@@ -5,6 +5,7 @@
 // net_match.cpp.
 #include "net_socket.h"
 #include "net_match.h"
+#include "net_snapshot.h"
 
 #include "mechosoma.h"
 #include "race.h"
@@ -90,12 +91,126 @@ static netSession* net_session_S = NULL;
 
 static unsigned int net_last_connect_ms = 0;
 static unsigned int net_last_input_ms = 0;
+static unsigned int net_last_snap_ms = 0;
 static int net_client_ready = 0;
 static int net_last_player_count = -1;
 static int net_camera_set = 0;
 static int net_start_logged = 0;
 
 static const int NET_CONNECT_RETRY_MS = 500;
+
+// The host sends one snapshot per tick. Net ticks run at NET_TICK_MS, so this
+// is 1000 / NET_TICK_MS and nothing else: any other rate would either flood
+// the socket or make every vehicle stutter.
+static const int NET_SNAPSHOT_HZ = NET_TICK_RATE_HZ;
+static const int NET_SNAPSHOT_PERIOD_MS = 1000 / NET_SNAPSHOT_HZ;
+
+/*
+	Host side: build a snapshot out of the local racers and send it.
+
+	Only the host knows where anything is. Every other machine gets a
+	position and a heading and draws from that, which is the whole point of
+	the server-authoritative design.
+*/
+static void net_send_snapshot(void)
+{
+	netRacerState racers[NET_MAX_PLAYERS];
+	unsigned char payload[NET_MAX_PAYLOAD];
+	unsigned int now = (unsigned int)clocki();
+	mchRacer* rp;
+	int count = 0;
+	int bytes;
+
+	if((int)(now - net_last_snap_ms) < NET_SNAPSHOT_PERIOD_MS) return;
+	net_last_snap_ms = now;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && count < NET_MAX_PLAYERS){
+		netRacerState* s = &racers[count];
+		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
+
+		memset(s,0,sizeof(netRacerState));
+
+		if(mr){
+			const Vect3f& pos = mr -> R();
+
+			s -> pos_x = net_q_world(pos.x);
+			s -> pos_y = net_q_world(pos.y);
+			s -> pos_z = net_q_height(pos.z);
+			s -> yaw = net_q_yaw(mr -> psi());
+
+			// Vglobal() rather than V: the member is protected, and a
+			// snapshot builder has no business reaching into it.
+			s -> vel_x = net_q_speed(mr -> Vglobal().x);
+			s -> vel_y = net_q_speed(mr -> Vglobal().y);
+			s -> vel_z = (signed char)mr -> Vglobal().z;
+
+			s -> speed = (unsigned short)mr -> Vglobal().norm();
+			}
+
+		s -> slot = (unsigned char)count;
+		s -> racer_id = (unsigned char)rp -> ID;
+		s -> kind = 0;
+		s -> place = 0;
+
+		count ++;
+		rp = rp -> next;
+		}
+
+	if(!count) return;
+
+	bytes = net_snapshot_pack(payload,sizeof(payload),net_match_S -> tick(),racers,count);
+	if(bytes > 0)
+		net_match_S -> sess() -> broadcast(NET_MSG_SNAPSHOT,payload,(unsigned int)bytes,0);
+}
+
+/*
+	Client side: put the host's view of a racer onto the local copy.
+
+	The local racer is skipped. It is driven by local input and simulated
+	locally, which is what keeps it responsive; overwriting it with a value
+	that has been across the network would add a round trip of lag to the
+	player's own car.
+
+	Remote racers are pose-driven from here on: they have no AI and no input,
+	so the physics runs on from wherever the last snapshot put them.
+*/
+static void net_apply_snapshot(const void* data,unsigned int len)
+{
+	netSnapshotHeader hdr;
+	netRacerState racers[NET_MAX_PLAYERS];
+	int local = net_match_S -> local_slot();
+	int count = net_snapshot_unpack(&hdr,racers,NET_MAX_PLAYERS,(const unsigned char*)data,len);
+
+	for(int i = 0; i < count; i ++){
+		mchRacer* rp = mch_raceD -> racerLst -> search(racers[i].slot);
+		mchMechosRacer* mr;
+
+		if(!rp || racers[i].slot == local) continue;
+
+		mr = dynamic_cast<mchMechosRacer*>(rp);
+		if(!mr) continue;
+
+		mr -> setPosition(Vect3f(net_uq_world(racers[i].pos_x),
+					 net_uq_world(racers[i].pos_y),
+					 net_uq_height(racers[i].pos_z)),
+				  net_uq_yaw(racers[i].yaw));
+
+		mr -> setGlobalVelocity(Vect3f(net_uq_speed(racers[i].vel_x),
+					       net_uq_speed(racers[i].vel_y),
+					       (float)racers[i].vel_z));
+		}
+}
+
+static void net_game_handler(int type,const void* data,unsigned int len,void* user)
+{
+	(void)user;
+
+	if(type != NET_MSG_SNAPSHOT) return;
+
+	net_apply_snapshot(data,len);
+}
 
 void mchNetStart(void)
 {
@@ -104,6 +219,10 @@ void mchNetStart(void)
 	net_session_S = new netSession;
 	net_match_S = new netMatch(net_session_S);
 	net_S = net_session_S;
+
+	// Snapshots mean nothing to the roster, so the match layer must hand them
+	// on rather than read them and throw them away.
+	net_match_S -> set_handler(net_game_handler,NULL);
 
 	// Zero asks for an ephemeral port, which is what a host wants: the
 	// client is told where to go, not the other way round.
@@ -334,12 +453,18 @@ void mchNetQuant(void)
 	if(mchNetHost){
 		net_apply_host_inputs();
 
+		// Snapshots only exist on the host: it is the only machine that knows
+		// where anything is.
+		if(net_match_S -> state() == NET_MATCH_RUNNING)
+			net_send_snapshot();
+
 		if(net_match_S -> state() != NET_MATCH_LOBBY)
 			mchNetStatusText = "Racing";
 		}
 
 	if(!mchNetHost && net_match_S -> local_slot() >= 0 && !net_client_ready){
 		mchRacer* rp = mch_raceD -> racerLst -> search(net_match_S -> local_slot());
+		int slot = 0;
 
 		net_client_ready = 1;
 
@@ -350,6 +475,22 @@ void mchNetQuant(void)
 		if(rp){
 			mch_raceD -> AI_Toggle(rp,0);
 			mch_raceD -> setActiveRacer(rp);
+			}
+
+		// Every other slot is driven by the host's snapshots. Leaving the AI
+		// on them would have two simulators steering the same car and the
+		// pose would be overwritten every frame while the forces kept
+		// accumulating: jitter, and the wrong car on screen.
+		rp = mch_raceD -> racerLst -> first();
+
+		while(rp){
+			if(slot != net_match_S -> local_slot()){
+				mch_raceD -> AI_Toggle(rp,0);
+				rp -> set_net_control(1);
+				}
+
+			rp = rp -> next;
+			slot ++;
 			}
 		}
 

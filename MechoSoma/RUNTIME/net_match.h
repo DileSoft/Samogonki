@@ -42,6 +42,16 @@ struct netMatchPlayer
 	char name[NET_NAME_LEN];
 };
 
+/*
+	Called for every message the match layer does not consume itself.
+
+	Snapshots and events both travel as their own message types and mean
+	nothing to a roster, so the game layer installs this to see them. Without
+	it those messages would be read out of the inbox and silently dropped by
+	the match layer, which is the state this was written to fix.
+*/
+typedef void (*netMatchHandler)(int type,const void* data,unsigned int len,void* user);
+
 class netMatch
 {
 public:
@@ -49,6 +59,8 @@ public:
 
 	// Pump everything. Called once per frame, after netSession::quant().
 	void quant(void);
+
+	void set_handler(netMatchHandler handler,void* user){ _handler = handler; _user = user; }
 
 	// ---- host side ----
 	int  open_host(const char* server_name,
@@ -128,6 +140,9 @@ private:
 
 	netMatchPlayer _players[NET_MAX_PLAYERS];
 
+	netMatchHandler _handler;
+	void* _user;
+
 	char _status[128];
 
 	int  server_peer(void);
@@ -147,8 +162,10 @@ private:
 	void kick(int peer_id,int reason,const char* text);
 	void begin_race(unsigned int start_tick);
 
-	void handle_host_message(int peer_id,int type,const void* data,unsigned int len,unsigned short seq);
-	void handle_client_message(int type,const void* data,unsigned int len);
+	// Both return 1 when the message was theirs, so the handler installed
+	// with set_handler() only sees what the roster left alone.
+	int  handle_host_message(int peer_id,int type,const void* data,unsigned int len,unsigned short seq);
+	int  handle_client_message(int type,const void* data,unsigned int len);
 };
 
 #endif /* __NET_MATCH_H__ */
