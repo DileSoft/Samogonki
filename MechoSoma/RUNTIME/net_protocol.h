@@ -304,7 +304,10 @@ enum netEventTypes
 	NET_EV_RACER_FINISHED,
 	NET_EV_HORN,
 	NET_EV_SLOT_TAKEN,
-	NET_EV_CHAT
+	NET_EV_CHAT,
+	NET_EV_ARCANE_STOP,
+
+	NET_EV_MAX
 };
 
 struct netEvent
@@ -313,12 +316,24 @@ struct netEvent
 	unsigned char slot;
 	signed short pos_x;
 	signed short pos_y;
-	unsigned char part;
+	unsigned char part;			// part index, only meaningful for an arcane
 	unsigned char arcane_id;
 	unsigned char target_id;
 	unsigned char reserved;
 	unsigned int time_ms;
 };
+
+// NET_MSG_EVENT, batched. Not because a player casts often - one button press
+// is one event - but because bursts happen: a racer crossing a line of seeds
+// casts once per seed, and one datagram per cast is one datagram per pickup
+// for the whole match.
+struct netEventHeader
+{
+	unsigned int server_tick;
+	unsigned char count;
+};
+
+const int NET_MAX_EVENT_PER_PACKET = 8;
 
 // NET_MSG_GAME_OVER
 struct netGameOver

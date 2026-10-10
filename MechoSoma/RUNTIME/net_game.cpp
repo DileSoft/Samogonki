@@ -8,6 +8,7 @@
 #include "net_snapshot.h"
 #include "net_fx.h"
 #include "net_spawn.h"
+#include "net_event.h"
 
 #include "mechosoma.h"
 #include "race.h"
@@ -230,6 +231,137 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 */
 static int net_rnd_seeded = 0;
 
+/* ------------------------------- arcane events ---------------------------- */
+
+/*
+	Live event queue. Filled by mchNetArcaneCast, flushed once per tick in
+	mchNetQuant(), next to the input batch - the same tick, so that an event
+	and the input that produced it travel together.
+*/
+static netEvent net_event_q[NET_MAX_EVENT_PER_PACKET];
+static int net_event_q_count = 0;
+
+void mchNetArcaneCast(int ownerID,int part,int event,int arcane_id)
+{
+	netEvent* e;
+
+	// Only a client sends. The host casts for real: mchArcaneData::fxlabStart()
+	// calls in here only when this flag says so, and the host's copy runs
+	// through the engine instead. An event arriving at a host is a bug, not a
+	// thing to forward.
+	if(!mchNetGame || mchNetHost) return;
+	if(!net_session_S || !net_match_S) return;
+
+	// part is which part the arcane sits on, resolved by the caller against the
+	// racer's own part list. -1 means it could not be resolved, and casting a
+	// spell on no part in particular would hit somebody else's car.
+	if(part < 0){
+		net_log("client: arcane %d dropped, part not resolved",arcane_id);
+		return;
+		}
+
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET){
+		net_log("client: event queue full, dropping one of %d",net_event_q_count);
+		return;
+		}
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = (unsigned char)event;
+	e -> slot = (unsigned char)net_match_S -> local_slot();
+	e -> part = (unsigned char)part;
+	e -> arcane_id = (unsigned char)arcane_id;
+
+	// Pos_x, pos_y and target_id are for event types that name a place or a
+	// victim. An arcane cast is neither: the host already knows where the
+	// racer is, because it is simulating that racer.
+	e -> pos_x = 0;
+	e -> pos_y = 0;
+	e -> target_id = 0;
+	e -> reserved = 0;
+	e -> time_ms = 0;
+}
+
+/*
+	Host side: replay an event against the racer it names.
+
+	Slot is the sender's, resolved against the roster order - which is the same
+	order net_apply_host_inputs() uses to hand out input, so an event and the
+	input that produced it land on the same car.
+*/
+static void net_apply_event(const netEvent* e)
+{
+	mchRacer* rp;
+	mchMechosRacer* mr;
+	cMesh* m;
+	int slot = 0;
+
+	if(e -> slot >= NET_MAX_PLAYERS) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && slot < e -> slot){
+		rp = rp -> next;
+		slot ++;
+		}
+
+	if(!rp) return;
+
+	mr = dynamic_cast<mchMechosRacer*>(rp);
+	if(!mr) return;
+
+	m = mr -> part_by_index(e -> part);
+	if(!m) return;
+
+	// Both arcane paths check this before they cast, so a client that has not
+	// yet spent an arcane and a host that already has are distinguishable here
+	// - which is what stops a client from holding a button down and getting a
+	// spell per press for free.
+	if(!(e -> type == NET_EV_ARCANE_STOP || m -> arcaneData.Status)) return;
+
+	m -> arcaneData.ownerID = rp -> ID;
+
+	// This re-enters mchArcaneData::fxlabStart(), which is fine on two counts:
+	// the host never routes out to the net layer, so it cannot loop, and the
+	// racer this lands on is the host's own simulation of that player's car.
+	switch(e -> type){
+		case NET_EV_ARCANE_CAST:
+			m -> arcaneData.fxlabStart();
+			break;
+
+		case NET_EV_ARCANE_STOP:
+			m -> arcaneData.fxlabStop();
+			break;
+
+		default: return;
+		}
+
+	net_log("host: event %d on slot %d part %d arcane %d",
+		(int)e -> type,(int)e -> slot,(int)e -> part,(int)e -> arcane_id);
+}
+
+static void net_flush_events(void)
+{
+	unsigned char buf[NET_MAX_PAYLOAD];
+	int bytes;
+
+	if(!net_event_q_count){
+		net_event_q_count = 0;
+		return;
+		}
+
+	bytes = net_event_pack(buf,sizeof(buf),net_match_S -> tick(),net_event_q,net_event_q_count);
+
+	// Reliable. A lost event is a spell that never happened, and spells are
+	// rare enough that the queue never falls behind.
+	if(bytes > 0)
+		net_session_S -> broadcast(NET_MSG_EVENT,buf,(unsigned int)bytes,1);
+
+	net_event_q_count = 0;
+}
+
 static void net_seed_cosmetic_rng(void)
 {
 	netWelcome w;
@@ -269,6 +401,22 @@ static void net_game_handler(int type,const void* data,unsigned int len,void* pl
 
 		case NET_MSG_ACTOR_STATE:
 			net_fx_actor_recv((const unsigned char*)data,len);
+			return;
+
+		// Events. The host is the only side that receives them, and it replays
+		// each one against the racer the sender named.
+		case NET_MSG_EVENT:
+			if(mchNetHost){
+				int count;
+				netEventHeader hdr;
+				netEvent batch[NET_MAX_EVENT_PER_PACKET];
+
+				count = net_event_unpack(&hdr,batch,NET_MAX_EVENT_PER_PACKET,
+							 (const unsigned char*)data,len);
+
+				for(int i = 0; i < count; i ++)
+					net_apply_event(&batch[i]);
+				}
 			return;
 		}
 
@@ -346,6 +494,7 @@ void mchNetFinit(void)
 	net_last_player_count = -1;
 	net_start_logged = 0;
 	net_rnd_seeded = 0;
+	net_event_q_count = 0;
 
 	mchNetStatusText = "";
 
@@ -516,6 +665,14 @@ void mchNetQuant(void)
 	// Class B. Flushes whatever the host queued while bodies were being
 	// attached, and drops entries for bodies that died in the last frame.
 	net_fx_quant();
+
+	// Events go out on the same tick as the input, so that a spell and the
+	// steering that went with it are one story. Queued by mchNetArcaneCast,
+	// which runs from the arcane machinery itself.
+	if(!mchNetHost)
+		net_flush_events();
+	else
+		net_event_q_count = 0;
 
 	/*
 		The registry is the one part of the stack that has never once run, so

@@ -14,6 +14,7 @@
 #include "IVisGeneric.h"
 #include "TERRA.H"
 #include "race.h"
+#include "mechosoma.h"
 #include "sound.h"
 
 #include "IGraph3d.h"
@@ -1680,12 +1681,67 @@ int fxlabValideArcane(int id)
 	return 1;
 };
 
+/*
+	Which part carries this arcane.
+
+	The same walk fxlabServerArcane.cpp does to turn a LinkPoint into a
+	PartNumber, and for the same reason: it is the only way to name one part to
+	another machine without carrying the mesh across the wire. Part indices are
+	stable across machines because every machine builds the same car the same
+	way, which is the same assumption the snapshot layer already makes.
+
+	Returns -1 for anything that cannot be resolved, and the caller drops the
+	event rather than casting on no part in particular: that would land the
+	spell on somebody else's car.
+*/
+static int mchArcanePartOf(const mchArcaneData* arcane)
+{
+	mchRacer* n;
+	mchMechosRacer* p;
+
+	if(!mch_raceD || !mch_raceD -> racerLst || !arcane) return -1;
+
+	n = mch_raceD -> racerLst -> first();
+
+	while(n){
+		if(n -> ID == arcane -> ownerID){
+			if(n -> Type != MCH_RACER_TYPE_MECHOS) return -1;
+
+			p = static_cast<mchMechosRacer*>(n);
+
+			for(int i = 0; i < NUM_PARTS; i ++)
+				if(&p -> part_by_index(i) -> arcaneData == arcane)
+					return i;
+
+			return -1;
+			}
+		n = n -> next;
+		}
+
+	return -1;
+}
+
 void mchArcaneData::fxlabStart()
 { 
 	#ifndef _FINAL_VERSION_
 	if(xreal_log)
 		bout < "fxlabStart: " <= ID < "\n";
 	#endif
+
+	/*
+		A client does not cast at all. The host simulates every racer from the
+		input it receives, so it is the only machine that can decide when a
+		spell goes off, and it is already going to decide it for this racer.
+
+		This is also what prevents the duplicate. Without it the client's own
+		copy of the racer would cast and so would the host's, and one button
+		press would put two spells on the track - one visible locally, one
+		visible everywhere.
+	*/
+	if(mchNetGame && !mchNetHost){
+		mchNetArcaneCast(ownerID,mchArcanePartOf(this),NET_EV_ARCANE_CAST,ID);
+		return;
+		}
 
 	mchRacer* n;
 	mchMechosRacer* p;
@@ -2811,6 +2867,14 @@ void mchArcaneData::fxlabStart()
 
 void mchArcaneData::fxlabStop()
 {
+	// Same rule as fxlabStart(), and for the same reason: the arcane lives in
+	// the host's simulation, so an interruption is something to tell it about
+	// rather than something to perform.
+	if(mchNetGame && !mchNetHost){
+		mchNetArcaneCast(ownerID,mchArcanePartOf(this),NET_EV_ARCANE_STOP,ID);
+		return;
+		}
+
 	if(Interruption && !Status)
 		fxlabServerD->StopArcane(ID,ownerID);
 };

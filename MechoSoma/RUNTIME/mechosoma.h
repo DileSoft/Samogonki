@@ -144,6 +144,21 @@ void mchNetStart(void);
 void mchNetFinit(void);
 void mchNetQuant(void);
 
+/*
+	Called from the arcane machinery, never from the game loop.
+
+	mchArcaneData::fxlabStart() is the one place both arcane paths converge on -
+	the HUD menu and driving over a seed - so that is where a client gives up
+	and asks the host to cast instead. On a host this does nothing and the
+	engine runs the arcane itself.
+
+	  ownerID    racer the arcane belongs to, as the engine numbers racers
+	  part       which part the arcane sits on, -1 if it could not be resolved
+	  event      one of NET_EV_ARCANE_*
+	  arcane_id  mchArcaneData::ID, so the host can log which spell it was
+*/
+void mchNetArcaneCast(int ownerID,int part,int event,int arcane_id);
+
 // Read only, for the UI. All safe to call with no session running.
 int  mchNetIsActive(void);
 int  mchNetState(void);

@@ -9,6 +9,7 @@
 #include "net_snapshot.h"
 #include "net_spawn.h"
 #include "net_actor.h"
+#include "net_event.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -1088,6 +1089,111 @@ static int net_test_actor(FILE* f)
 	return ok;
 }
 
+/*
+	Event codec test.
+
+	An event is not a state, so there is nothing about a position to check
+	here: what is being pinned down is that the three things a cast actually
+	needs - which racer, which part, which spell - survive the round trip, and
+	that a batch claiming more events than it holds is refused rather than read
+	past its end.
+
+	The fields a cast does not use are set to zero deliberately and checked as
+	zero. pos_x, pos_y and target_id are for event types that name a place or a
+	victim, and an arcane cast is neither: the host already knows where the
+	racer is, because it is simulating that racer.
+*/
+static int net_test_event(FILE* f)
+{
+	int ok = 1;
+
+	if(sizeof(netEvent) != 14 || sizeof(netEventHeader) != 5){
+		net_logf(f,"FAIL sizeof event %u/%u, expected 14/5",
+			(unsigned)sizeof(netEvent),(unsigned)sizeof(netEventHeader));
+		ok = 0;
+		}
+
+	// One arcane cast, exactly as mchNetArcaneCast builds it.
+	{
+		netEvent sent[NET_MAX_EVENT_PER_PACKET];
+		netEvent got[NET_MAX_EVENT_PER_PACKET];
+		netEventHeader hdr;
+		unsigned char payload[NET_MAX_PAYLOAD];
+		int bytes,count;
+
+		for(int i = 0; i < NET_MAX_EVENT_PER_PACKET; i ++){
+			memset(&sent[i],0,sizeof(netEvent));
+
+			sent[i].type = (unsigned char)(i % 2 ? NET_EV_ARCANE_CAST : NET_EV_ARCANE_STOP);
+			sent[i].slot = (unsigned char)i;
+			sent[i].part = (unsigned char)(i * 3);
+			sent[i].arcane_id = (unsigned char)(40 + i);
+			}
+
+		bytes = net_event_pack(payload,sizeof(payload),4242,sent,NET_MAX_EVENT_PER_PACKET);
+		count = net_event_unpack(&hdr,got,NET_MAX_EVENT_PER_PACKET,payload,bytes);
+
+		if(bytes != (int)sizeof(netEventHeader)
+			   + NET_MAX_EVENT_PER_PACKET * (int)sizeof(netEvent) ||
+		   count != NET_MAX_EVENT_PER_PACKET || hdr.server_tick != 4242){
+			net_logf(f,"FAIL event batch: %d bytes, %d of %d events, tick %u",
+				bytes,count,NET_MAX_EVENT_PER_PACKET,(unsigned)hdr.server_tick);
+			ok = 0;
+			}
+		else {
+			for(int i = 0; i < NET_MAX_EVENT_PER_PACKET; i ++)
+				if(memcmp(&sent[i],&got[i],sizeof(netEvent))){
+					net_logf(f,"FAIL event %d differs after round trip",i);
+					ok = 0;
+					}
+			}
+
+		// A batch claiming more events than it holds must be refused, and so
+		// must one a single byte short.
+		{
+			unsigned char forged[NET_MAX_PAYLOAD];
+
+			memset(forged,0,sizeof(forged));
+			forged[4] = (unsigned char)NET_MAX_EVENT_PER_PACKET;	// count sits at offset 4
+
+			if(net_event_unpack(&hdr,got,NET_MAX_EVENT_PER_PACKET,forged,1) != 0){
+				net_logf(f,"FAIL event: truncated payload accepted");
+				ok = 0;
+				}
+
+			if(net_event_unpack(&hdr,got,NET_MAX_EVENT_PER_PACKET,forged,
+					    (int)sizeof(netEventHeader)
+					    + NET_MAX_EVENT_PER_PACKET * (int)sizeof(netEvent) - 1) != 0){
+				net_logf(f,"FAIL event: payload one byte short accepted");
+				ok = 0;
+				}
+
+			if(net_event_unpack(&hdr,got,NET_MAX_EVENT_PER_PACKET,forged,
+					    (int)sizeof(netEventHeader)
+					    + NET_MAX_EVENT_PER_PACKET * (int)sizeof(netEvent)) !=
+			   NET_MAX_EVENT_PER_PACKET){
+				net_logf(f,"FAIL event: full payload refused");
+				ok = 0;
+				}
+			}
+
+		if(net_event_pack(payload,sizeof(payload),1,sent,0) != 0){
+			net_logf(f,"FAIL event: empty batch accepted");
+			ok = 0;
+			}
+
+		if(net_event_pack(payload,sizeof(payload),1,sent,NET_MAX_EVENT_PER_PACKET + 1) != 0){
+			net_logf(f,"FAIL event: oversized batch accepted");
+			ok = 0;
+			}
+		}
+
+	net_logf(f,"event: %u bytes, batch %d, carries slot and part and nothing else",
+		(unsigned)sizeof(netEvent),NET_MAX_EVENT_PER_PACKET);
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -1113,6 +1219,7 @@ int net_selftest(void)
 	int got_snapshot = 0;
 	int got_spawn = 0;
 	int got_actor = 0;
+	int got_event = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -1300,12 +1407,16 @@ int net_selftest(void)
 	if(!got_actor)
 		net_logf(f,"FAIL net_test_actor");
 
-	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && got_spawn && got_actor && host_reliable == 1 &&
+	got_event = net_test_event(f);
+	if(!got_event)
+		net_logf(f,"FAIL net_test_event");
+
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && got_spawn && got_actor && got_event && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d spawn=%d actor=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot,got_spawn,got_actor);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d spawn=%d actor=%d event=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot,got_spawn,got_actor,got_event);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);
