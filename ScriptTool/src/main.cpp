@@ -74,7 +74,7 @@ int handle_scripts(int argc, char const *argv[])
 			}
 
 			const auto file_path = languages_path / codepage.language_code / script_file.script_binary_file;
-			saveScript(file_path.c_str(), block.get());
+			saveScript(file_path.string().c_str(), block.get());
 		}
 	}
 

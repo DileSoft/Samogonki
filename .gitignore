@@ -39,5 +39,6 @@ CMakeFiles
 
 /build-ucrt
 /build-mingw
+/build-scripttool
 /ffmpeg
 /nettest.log

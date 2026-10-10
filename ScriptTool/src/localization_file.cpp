@@ -137,7 +137,7 @@ void LocalizationFile::ProcessScript(const common::ScriptFile &script_file)
 		);
 		if (fs::exists(special_case_path))
 		{
-			SCRDataBlockPtr result(parseScript(special_case_path.c_str(), script_file.set_file));
+			SCRDataBlockPtr result(parseScript(special_case_path.string().c_str(), script_file.set_file));
 			if (result == nullptr)
 			{
 				throw std::runtime_error("failed to parse script");
@@ -161,7 +161,7 @@ void LocalizationFile::ProcessScript(
 	std::cout << std::format("processing script for language={}", codepage.language_code) << std::endl;
 
 	const auto file = language_path / script_file.script_binary_file;
-	auto target_block = loadScript(file.c_str());
+	auto target_block = loadScript(file.string().c_str());
 	if (target_block == nullptr)
 	{
 		throw std::runtime_error(std::format("failed to parse script", file.string()));
