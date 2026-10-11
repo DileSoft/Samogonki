@@ -395,6 +395,7 @@ struct fxlabClientVoodooMasterLink : fxlabClientMechosBindingType
 	void SetRadius(float r) override { Radius = r; };
 
 	void SetTarget(class mchMechosRacer* p) override;
+	int IsTargetLocked() override { return LockTarget; };
 };
 
 

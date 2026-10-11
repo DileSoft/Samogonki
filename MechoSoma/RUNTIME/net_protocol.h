@@ -67,7 +67,7 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // its high half - as 16 bits the kind was lost and the client could not find
 // the mesh to build. A peer of another version is refused in the handshake
 // rather than read with the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 7;
+const unsigned int NET_PROTO_VERSION	= 8;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -256,7 +256,7 @@ struct netKick
 
 /* ------------------------------- SNAPSHOTS ------------------------------- */
 
-// One racer, 52 bytes. Positions wrap around the world, the engine world is
+// One racer, 54 bytes. Positions wrap around the world, the engine world is
 // toroidal (GlobalWorldSize, 2048 by default) so a 16 bit value is exact
 // enough and survives crossing the border for free.
 struct netRacerState
@@ -298,6 +298,7 @@ struct netRacerState
 	unsigned char checkpoint;
 	unsigned char place;
 	unsigned int time_ms;
+	unsigned short nstar;		// mchRacer::NStar + stPtr->NStar
 
 	unsigned char bonus_count;	// followed by that many netBonus
 };

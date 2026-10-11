@@ -151,6 +151,12 @@ struct fxlabGeneralObjectType
 	virtual void SetDeltaAngle(float delta){};
 	virtual void SetTarget(class mchMechosRacer* p){};
 
+	// Whether this object has latched onto a target and stopped orbiting. Only
+	// the net voodoo mirror has more than one instance per arcane and needs to
+	// tell a still-orbiting head from a locked one; everything else is always
+	// free.
+	virtual int IsTargetLocked(){ return 0; };
+
 	virtual void SetScaleAnimation(float start_scale,float end_scale,int time){};
 
 	virtual void SetDirectionMatrix(const class Mat3f& m){};

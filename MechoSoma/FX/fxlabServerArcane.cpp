@@ -714,10 +714,11 @@ void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const Vect3f& Positio
 	mirrored heads should leave its orbit and home in - see
 	fxlabServerVoodooHead::Quant, which is where a head reaches a racer.
 
-	One head, not all five: the host latches the single head that hit and the
-	others keep circling. Every mirrored object of this arcane carries the
-	(owner, arcane) tag, and SetTarget is a no-op on anything that is not a
-	voodoo link, so the first tagged object is the right one.
+	One head per event, and the next still-orbiting one is chosen: the host
+	latches heads one at a time as each reaches a racer, and if every event
+	re-locked the first head the others would never appear to jump. Every
+	mirrored object of this arcane carries the (owner, arcane) tag, and
+	IsTargetLocked is true only on a voodoo head that has already locked.
 */
 void fxlabClientArcaneLatch(int arcane_id,int owner_id,int victim_id)
 {
@@ -745,7 +746,8 @@ void fxlabClientArcaneLatch(int arcane_id,int owner_id,int victim_id)
 	while(it != fxlabClientD -> ObjectList.end()){
 		fxlabGeneralObjectType* t = *it;
 
-		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id){
+		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id &&
+		   !t -> IsTargetLocked()){
 			t -> SetTarget(victim);
 			return;
 			}
@@ -758,7 +760,8 @@ void fxlabClientArcaneLatch(int arcane_id,int owner_id,int victim_id)
 	while(it != fxlabClientD -> CreateList.end()){
 		fxlabGeneralObjectType* t = *it;
 
-		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id){
+		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id &&
+		   !t -> IsTargetLocked()){
 			t -> SetTarget(victim);
 			return;
 			}

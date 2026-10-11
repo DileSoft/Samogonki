@@ -565,8 +565,8 @@ static int net_test_snapshot(FILE* f)
 {
 	int ok = 1;
 
-	if(sizeof(netRacerState) != 52){
-		net_logf(f,"FAIL sizeof(netRacerState) = %u, expected 52",sizeof(netRacerState));
+	if(sizeof(netRacerState) != 54){
+		net_logf(f,"FAIL sizeof(netRacerState) = %u, expected 54",sizeof(netRacerState));
 		ok = 0;
 		}
 

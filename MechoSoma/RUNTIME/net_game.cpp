@@ -235,6 +235,12 @@ static void net_send_snapshot(void)
 			s -> vel_z = (signed char)mr -> Vglobal().z;
 
 			s -> speed = (unsigned short)mr -> Vglobal().norm();
+			s -> energy = net_q_mana(mr -> Energy(),mr -> energy_max());
+
+			// Race state for the table: time, stars and the finished flag. The
+			// client cannot derive any of them for a car it only places by
+			// pose, and the result screen reads all three.
+			s -> flags = (unsigned short)rp -> flags;
 
 		// Race standing. The result table and the HUD read these off every
 		// racer's own stats, and a client's remote cars are pose-driven - they
@@ -244,6 +250,8 @@ static void net_send_snapshot(void)
 			s -> lap = (unsigned char)rp -> stPtr -> Lap;
 			s -> checkpoint = (unsigned char)rp -> stPtr -> Checkpoint;
 			s -> place = (unsigned char)rp -> stPtr -> place;
+			s -> time_ms = (unsigned int)(rp -> stPtr -> time + rp -> stPtr -> cur_time);
+			s -> nstar = (unsigned short)(rp -> NStar + rp -> stPtr -> NStar);
 			}
 
 			// Arcane mana per part. The host is the only machine whose arcane
@@ -585,7 +593,24 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			rp -> stPtr -> Lap = racers[i].lap;
 			rp -> stPtr -> Checkpoint = racers[i].checkpoint;
 			rp -> stPtr -> place = racers[i].place;
+
+			// The running time is stored as the total elapsed, with the local
+			// segment cleared, so the table reads one number and the client's
+			// own accumulation cannot add to it before the next snapshot.
+			rp -> stPtr -> time = (int)racers[i].time_ms;
+			rp -> stPtr -> cur_time = 0;
+
+			rp -> stPtr -> NStar = racers[i].nstar;
+			rp -> NStar = 0;
 			}
+
+		// Only the finished bit is applied. The rest of mchRacer::flags is
+		// this machine's own bookkeeping - AI, active racer, net remote - and
+		// copying it wholesale would change how this car is driven.
+		if(racers[i].flags & MCH_FINISHED)
+			rp -> flags |= MCH_FINISHED;
+		else
+			rp -> flags &= ~MCH_FINISHED;
 
 		// Buffered, not applied: the draw interpolates between the last two
 		// snapshots a fixed delay behind the newest. See
