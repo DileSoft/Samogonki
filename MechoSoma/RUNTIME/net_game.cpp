@@ -24,6 +24,10 @@
 // declaration is enough for the pause undo below.
 extern void mchResumeSound(void);
 
+// The end-of-race screen, normally entered from the race dispatcher. The
+// client reaches it from here when the host says the race is over.
+void mchEndGame(void);
+
 /*
 	Net races write a running log to net.log, next to the binary.
 
@@ -951,6 +955,60 @@ void mchNetArcaneLatch(int ownerID,int arcane_id,int victimID)
 }
 
 /*
+	Host side: the race is over, so every client should show the same end
+	screen. The host is the only machine whose finish decides that - a client
+	ends its own race only if its own car happened to finish - so it has to be
+	told.
+
+	The order and times ride along for a future results screen; nothing reads
+	them yet. Reliable: a lost ending leaves a client racing a finished race.
+*/
+void mchNetGameOver(void)
+{
+	netGameOver msg;
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+
+	memset(&msg,0,sizeof(msg));
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && slot < NET_MAX_PLAYERS){
+		if(rp -> stPtr){
+			msg.order[slot] = (unsigned char)rp -> stPtr -> place;
+			msg.time[slot] = (unsigned short)(rp -> stPtr -> time / 1000);
+			}
+		rp = rp -> next;
+		slot ++;
+		}
+
+	net_match_S -> sess() -> broadcast(NET_MSG_GAME_OVER,&msg,(unsigned int)sizeof(msg),1);
+	net_log("host: race over, told the clients");
+}
+
+/*
+	Client side: the host says the race is over. mchEndGame is the same call
+	the host makes - it only differs in skipping the single-player rewards
+	when mchNetGame - and it is idempotent, so a client that already ended its
+	own race does nothing here.
+*/
+static void net_apply_game_over(const netGameOver* msg,unsigned int len)
+{
+	(void)msg;
+
+	if(mchNetHost) return;
+	if(len < sizeof(netGameOver)) return;
+	if(!mch_raceD) return;
+	if(mchTimeMode == MCH_TIME_GAME_OVER) return;
+
+	mchEndGame();
+	net_log("client: host ended the race");
+}
+
+/*
 	Client side: an arcane somebody else cast. Build only its visual.
 
 	The sender is skipped: it already built its own visual the moment it
@@ -1062,6 +1120,10 @@ static void net_game_handler(int type,const void* data,unsigned int len,void* pl
 
 		case NET_MSG_ACTOR_STATE:
 			net_fx_actor_recv((const unsigned char*)data,len);
+			return;
+
+		case NET_MSG_GAME_OVER:
+			net_apply_game_over((const netGameOver*)data,len);
 			return;
 
 		// Events travel both ways now: a client sends its casts to the host,

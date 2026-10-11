@@ -199,6 +199,12 @@ void mchNetArcaneVisualStop(int ownerID,int arcane_id);
 void mchNetArcaneLatch(int ownerID,int arcane_id,int victimID);
 
 /*
+	Host side: the race is over. Tells the clients so they show the same end
+	screen. No-op off the host. Sent once, when mchEndGame runs.
+*/
+void mchNetGameOver(void);
+
+/*
 	Write one line to the running net log from a layer that has no logger of
 	its own (net_fx.cpp). No-op when no race is running.
 */

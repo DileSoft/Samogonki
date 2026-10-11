@@ -3760,7 +3760,7 @@ void mchEndGame(void)
 	else
 		mchA_BonusMesh = NULL;
 
-	if(!mchSplitScreenGame && mchGameMode == MCH_SINGLE_GAME){
+	if(!mchSplitScreenGame && mchGameMode == MCH_SINGLE_GAME && !mchNetGame){
 		mchA_EndGameMode = AE_RACE_NOT_LOST;
 		if(!mch_raceD -> activeRacer -> stPtr -> place){
 			if(mchA_TrackPart && !mch_raceD -> activeRacer -> stPtr -> partFlags[mchA_TrackPart]){
@@ -3816,6 +3816,11 @@ void mchEndGame(void)
 	if(!mchMusicMute) mchSetMusicMode(MCH_CD_SHOW);
 
 	mchGameFinit = 1;
+
+	// A net race ends for everyone at once: only the host's finish decides
+	// that, so it tells the clients to show the same screen. No-op elsewhere.
+	if(mchNetGame && mchNetHost)
+		mchNetGameOver();
 }
 
 void mchEndGameFinit(int mode)
