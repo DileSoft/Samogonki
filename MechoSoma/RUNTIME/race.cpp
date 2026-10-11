@@ -1902,6 +1902,19 @@ void mchNetFinishVisual(mchRacer* p)
 		p -> StartEffect(Mechos::Effect::ExultEffect);
 }
 
+/*
+	Client side: a remote racer took a bonus. The pickup runs on the host, so
+	the fanfare for a car this machine only poses arrives as an event; see
+	mchNetBonus. Same sound and effect as the two AddBonus overrides.
+*/
+void mchNetBonusVisual(mchRacer* p)
+{
+	if(!p) return;
+
+	mchStartSoundEFF(EFF_BONUS,p -> R().x,p -> R().y);
+	p -> StartEffect(Mechos::Effect::BonusExultEffect);
+}
+
 void mchRacerStats::save(XStream* fh)
 {
 	int i;

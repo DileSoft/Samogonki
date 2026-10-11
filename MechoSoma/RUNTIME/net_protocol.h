@@ -67,7 +67,7 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // its high half - as 16 bits the kind was lost and the client could not find
 // the mesh to build. A peer of another version is refused in the handshake
 // rather than read with the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 8;
+const unsigned int NET_PROTO_VERSION	= 9;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -331,6 +331,7 @@ enum netEventTypes
 	NET_EV_ARCANE_STOP,
 	NET_EV_ARCANE_STOP_VISUAL,
 	NET_EV_ARCANE_LATCH,		// target_id: the racer a spell latched onto
+	NET_EV_BONUS,			// arcane_id: the bonus a racer just picked up
 
 	NET_EV_MAX
 };

@@ -212,6 +212,12 @@ void mchNetGameOver(void);
 void mchNetRacerFinished(int ownerID);
 
 /*
+	Host side: a racer picked up a bonus. The clients see a remote car only
+	from snapshots, so the pickup fanfare is relayed. No-op off the host.
+*/
+void mchNetBonus(int ownerID,int arcane_id);
+
+/*
 	Write one line to the running net log from a layer that has no logger of
 	its own (net_fx.cpp). No-op when no race is running.
 */

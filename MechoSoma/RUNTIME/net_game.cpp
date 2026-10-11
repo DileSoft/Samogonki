@@ -32,6 +32,9 @@ void mchEndGame(void);
 // did not simulate. Lives there because the audio headers already do.
 void mchNetFinishVisual(mchRacer* p);
 
+// race.cpp: the same, for a bonus pickup.
+void mchNetBonusVisual(mchRacer* p);
+
 /*
 	Net races write a running log to net.log, next to the binary.
 
@@ -1031,6 +1034,40 @@ void mchNetRacerFinished(int ownerID)
 }
 
 /*
+	Host side: a racer just picked up a bonus. The clients can see the box
+	vanish (it is a replicated actor) but not the fanfare, because they never
+	run the pickup for a car they only pose. Relayed like the finish.
+*/
+void mchNetBonus(int ownerID,int arcane_id)
+{
+	netEvent* e;
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != ownerID){
+		rp = rp -> next;
+		slot ++;
+		}
+
+	if(!rp) return;
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = NET_EV_BONUS;
+	e -> slot = (unsigned char)slot;
+	e -> arcane_id = (unsigned char)arcane_id;
+}
+
+/*
 	Client side: the host says the race is over. mchEndGame is the same call
 	the host makes - it only differs in skipping the single-player rewards
 	when mchNetGame - and it is idempotent, so a client that already ended its
@@ -1063,7 +1100,8 @@ static void net_apply_visual_event(const netEvent* e)
 
 	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT &&
 	   e -> type != NET_EV_ARCANE_STOP_VISUAL && e -> type != NET_EV_ARCANE_LATCH &&
-	   e -> type != NET_EV_HORN && e -> type != NET_EV_RACER_FINISHED) return;
+	   e -> type != NET_EV_HORN && e -> type != NET_EV_RACER_FINISHED &&
+	   e -> type != NET_EV_BONUS) return;
 	if(e -> slot >= NET_MAX_PLAYERS) return;
 
 	net_log("client: visual arcane %d type %d slot %d",(int)e -> arcane_id,(int)e -> type,(int)e -> slot);
@@ -1092,6 +1130,16 @@ static void net_apply_visual_event(const netEvent* e)
 		if(e -> slot != net_match_S -> local_slot()){
 			mchNetFinishVisual(rp);
 			net_log("client: racer %d finished",(int)e -> slot);
+			}
+		return;
+		}
+
+	if(e -> type == NET_EV_BONUS){
+		// The pickup happened on the host. The picking machine already ran it
+		// locally (its own car, simulated here), so only the others draw it.
+		if(e -> slot != net_match_S -> local_slot()){
+			mchNetBonusVisual(rp);
+			net_log("client: racer %d took bonus %d",(int)e -> slot,(int)e -> arcane_id);
 			}
 		return;
 		}
