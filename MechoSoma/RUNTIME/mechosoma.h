@@ -137,6 +137,7 @@ extern int mchSplitScreenGame;
 extern int mchNetGame;
 extern int mchNetHost;
 extern int mchNetRaceAuto;
+extern int mchNetAutoDrive;
 extern char mchNetJoinAddr[128];
 extern int mchNetPort;
 extern const char* mchNetStatusText;

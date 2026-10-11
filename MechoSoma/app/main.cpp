@@ -135,6 +135,11 @@ int main(int argc, char const *argv[]) {
           mchNetGame = 1;
           mchNetRaceAuto = 1;
       }
+      // -netdrive makes the client steer itself. Test scaffolding: it exercises
+      // the client-sends / host-applies input path with no keyboard involved.
+      if (strcmp(argv[i], "-netdrive") == 0) {
+          mchNetAutoDrive = 1;
+      }
   }
   #ifdef STEAM_VERSION
   if (!SteamAPI_Init()) {

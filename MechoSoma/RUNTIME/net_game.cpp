@@ -96,6 +96,15 @@ int mchNetHost = 0;
 	MCH_SINGLE_GAME, onto the loading screen - with the menu Quant skipped.
 */
 int mchNetRaceAuto = 0;
+/*
+	-netdrive: the client drives itself.
+
+	A keyboard is not available to a test, and the input path is exactly what
+	needs exercising: the client sends, the host applies. This makes the client
+	send a fixed steering sample every tick instead of reading the keyboard.
+	Test scaffolding, no effect on a normal race.
+*/
+int mchNetAutoDrive = 0;
 char mchNetJoinAddr[128] = "127.0.0.1";
 int mchNetPort = NET_DEFAULT_PORT;
 
@@ -138,6 +147,11 @@ static int net_start_logged = 0;
 // field is actually driving or just sitting there.
 static Vect3f net_motion_last[NET_MAX_PLAYERS];
 static int net_motion_have = 0;
+
+// Input counters. input_sent is the client speaking, input_recv the host
+// hearing: two numbers that tell a silent client from a deaf host.
+static unsigned int net_input_sent_count = 0;
+static unsigned int net_input_recv_count = 0;
 
 static const int NET_CONNECT_RETRY_MS = 500;
 
@@ -880,6 +894,8 @@ void mchNetFinit(void)
 	net_start_logged = 0;
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
+	net_input_sent_count = 0;
+	net_input_recv_count = 0;
 	net_event_q_count = 0;
 
 	mchNetStatusText = "";
@@ -944,8 +960,10 @@ static void net_apply_host_inputs(void)
 	while(rp){
 		netInput in;
 
-		if(slot != NET_SLOT_HOST && net_match_S -> get_input(slot,&in))
+		if(slot != NET_SLOT_HOST && net_match_S -> get_input(slot,&in)){
 			rp -> set_net_input(in);
+			net_input_recv_count ++;
+			}
 
 		rp = rp -> next;
 		slot ++;
@@ -1025,9 +1043,18 @@ static void net_send_client_input(void)
 	mechos -> read_input(in);
 	in.tick = net_match_S -> tick();
 
+	// -netdrive: pretend the player is holding down forward and turning. The
+	// route to the host is exactly the real one from here on.
+	if(mchNetAutoDrive){
+		in.traction = 127;
+		in.rudder = 48;
+		}
+
 	bytes = net_match_S -> build_input(payload,sizeof(payload),in);
 	if(bytes > 0)
 		net_match_S -> send_input(payload,bytes);
+
+	net_input_sent_count ++;
 }
 
 /*
@@ -1040,10 +1067,13 @@ static void net_send_client_input(void)
 static void net_log_motion(void)
 {
 	mchRacer* rp = mch_raceD -> racerLst -> first();
+	char mask[NET_MAX_PLAYERS + 1];
 	int slot = 0,moved = 0,total = 0;
 
 	while(rp && slot < NET_MAX_PLAYERS){
 		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
+
+		mask[slot] = '.';
 
 		if(mr){
 			const Vect3f& r = mr -> R();
@@ -1052,7 +1082,7 @@ static void net_log_motion(void)
 				float dx = r.x - net_motion_last[slot].x;
 				float dy = r.y - net_motion_last[slot].y;
 
-				if(dx*dx + dy*dy > 4.0f) moved ++;
+				if(dx*dx + dy*dy > 4.0f){ moved ++; mask[slot] = 'm'; }
 				}
 
 			net_motion_last[slot] = r;
@@ -1063,9 +1093,14 @@ static void net_log_motion(void)
 		slot ++;
 		}
 
+	mask[slot] = 0;
 	net_motion_have = 1;
 
-	net_log("%s: %d of %d racers moved",mchNetHost ? "host" : "client",moved,total);
+	// The mask names which slots moved, in slot order: `m` is a car that went
+	// somewhere in the last ten seconds. A parked car shows as `.`, which is
+	// what tells a car that is not being driven from one that is not there.
+	net_log("%s: %d of %d racers moved [%s]",
+		mchNetHost ? "host" : "client",moved,total,mask);
 }
 
 void mchNetQuant(void)
@@ -1128,6 +1163,10 @@ void mchNetQuant(void)
 			mchNetHost ? "host" : "client",projectiles,actors);
 
 		net_log_motion();
+
+		net_log("%s: input sent %u, recv %u",
+			mchNetHost ? "host" : "client",
+			net_input_sent_count,net_input_recv_count);
 		}
 
 	/* --------------------------- drive the race ------------------------- */

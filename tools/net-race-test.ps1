@@ -176,7 +176,7 @@ try {
     } else { Ok 'host entered the race' }
 
     # 2. Client up and into the race.
-    $clientProc = Start-Target 'client' (New-Args @('-netjoin',$JoinAddr,'-netrace')) 'gdb-net-client.gdb' $ClientOut
+    $clientProc = Start-Target 'client' (New-Args @('-netjoin',$JoinAddr,'-netrace','-netdrive')) 'gdb-net-client.gdb' $ClientOut
     if (-not (Wait-Log $ClientLog 'net race start, client' $StartTimeoutSec)) {
         Fail "client never reached the race (no 'net race start, client' in $StartTimeoutSec s)"
     } else { Ok 'client entered the race' }
@@ -218,20 +218,32 @@ try {
     if ($hostSawEntities)   { Ok 'host reported live entities' }   else { Fail 'host reported no live entities during the race' }
     if ($clientSawEntities) { Ok 'client reported live entities' } else { Fail 'client reported no live entities during the race' }
 
-    # 6. The field is actually driving. Three of the five racers are bots and
-    #    have to move on their own, so a report below that means the AI or the
-    #    input routing is broken even though the handshake looked fine.
-    foreach ($side in @(@('host', $HostLog), @('client', $ClientLog))) {
-        $name = $side[0]; $log = $side[1]; $moved = -1
+    # 6. The field is actually driving. The host has to see the client's car
+    #    move too (-netdrive steers it), which is the only end-to-end proof that
+    #    client input reaches the host and is applied there.
+    foreach ($side in @(@('host', $HostLog, 4), @('client', $ClientLog, 3))) {
+        $name = $side[0]; $log = $side[1]; $want = $side[2]; $moved = -1
         if (Test-Path $log) {
             $line = Get-Content $log -ErrorAction SilentlyContinue |
                     Select-String -Pattern '(\d+) of (\d+) racers moved' | Select-Object -Last 1
             if ($line) { $moved = [int]$line.Matches[0].Groups[1].Value }
         }
-        if ($moved -lt 0)        { Fail "${name} never reported racer motion" }
-        elseif ($moved -lt 3)    { Fail "${name}: only $moved racer(s) moved, expected the bots" }
-        else                     { Ok "${name}: $moved racers moving" }
+        if ($moved -lt 0)         { Fail "${name} never reported racer motion" }
+        elseif ($moved -lt $want) { Fail "${name}: only $moved racer(s) moved, expected $want (bots + the driving client)" }
+        else                      { Ok "${name}: $moved racers moving" }
     }
+
+    # 7. Input counters: the client must be speaking and the host must be
+    #    hearing. A silent client and a deaf host look identical in the game.
+    $hSent = 0; $hRecv = 0; $cSent = 0
+    $hLine = Get-Content $HostLog -ErrorAction SilentlyContinue |
+             Select-String -Pattern 'input sent (\d+), recv (\d+)' | Select-Object -Last 1
+    if ($hLine) { $hSent = [int]$hLine.Matches[0].Groups[1].Value; $hRecv = [int]$hLine.Matches[0].Groups[2].Value }
+    $cLine = Get-Content $ClientLog -ErrorAction SilentlyContinue |
+             Select-String -Pattern 'input sent (\d+), recv (\d+)' | Select-Object -Last 1
+    if ($cLine) { $cSent = [int]$cLine.Matches[0].Groups[1].Value }
+    if ($cSent -le 0) { Fail 'client sent no input' } else { Ok "client sent $cSent input samples" }
+    if ($hRecv -le 0) { Fail 'host received no client input' } else { Ok "host received $hRecv input samples" }
 }
 finally {
     Stop-Target $clientProc
