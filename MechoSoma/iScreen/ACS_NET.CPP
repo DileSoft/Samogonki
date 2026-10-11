@@ -244,9 +244,9 @@ static void nm_refresh(void)
 	nm_format_value(NM_SP3,buf,sizeof(buf));   nm_set_text(NM_SP3,buf);
 	nm_format_value(NM_WORLD,buf,sizeof(buf)); nm_set_text(NM_WORLD,buf);
 
-	// Text rows show the bare value: they are edited in place.
-	nm_set_text(NM_ADDR,nm_addr);
-	nm_set_text(NM_NAME,nm_name[0] ? nm_name : "-");
+	// Address and Name are edited in place: the field is the live text, so a
+	// refresh must not write the state variable back into it, or picking a
+	// mechos would wipe what the player typed. Seeded once at init.
 }
 
 /* --------------------------- cycling values ------------------------------ */
@@ -585,6 +585,11 @@ void acsInitNetMenu(void)
 
 	if(mchCurrentWorld >= 0)
 		nm_world = mchCurrentWorld;
+
+	// Seed the two editable rows once, now that their state is known. They are
+	// never written again on refresh, so a typed name survives a mechos pick.
+	nm_set_text(NM_ADDR,nm_addr);
+	nm_set_text(NM_NAME,nm_name[0] ? nm_name : "-");
 
 	nm_refresh();
 
