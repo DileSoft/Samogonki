@@ -376,12 +376,12 @@ static void acsOpenWebSite(const char* url)
 }
 
 // Menu strings are stored in the codepage of the active language...
-static const char* acsGetWebSiteString(void)
+static const char* acsGetNetGameString(void)
 {
 	if(!strcmp(localization::getLanguage(),"ru"))
-		return "\xF1\xE0\xE9\xF2";	// cp1251 for "SAYT"
+		return "\xD1\xE5\xF2\xE5\xE2\xE0\xFF \xE8\xE3\xF0\xE0";	// cp1251 "Сетевая игра"
 
-	return "WEBSITE";
+	return "NETWORK GAME";
 }
 
 static int acsGetMenuItemY(int index,int count)
@@ -403,10 +403,10 @@ static void acsAddEventCommand(aciScreenEvent* ev,int code,int d0,int d1,int d2,
 	ev -> AddCommand(comm);
 }
 
-// The "Website" option is described in ISCREEN.SCR, but the compiled iscreen.scb
-// only picks it up when the script is rebuilt. Until then the option is created
-// here, reusing the look of the sibling menu items...
-void acsAddWebSiteOption(int scr_id,int item_index,int item_count)
+// The "Network Game" option takes the website's slot on the main menu. The
+// compiled iscreen.scb has no such row, so it is created here, reusing the
+// look of the sibling menu items, and leads to the hardcoded LAN screen.
+static void acsAddNetGameOption(int scr_id,int item_index,int item_count)
 {
 	aciScreen* scr = acsScrD -> GetScreen(scr_id);
 	aciScreenInputField* proto;
@@ -462,7 +462,7 @@ void acsAddWebSiteOption(int scr_id,int item_index,int item_count)
 	obj -> dAlpha = proto -> dAlpha;
 
 	obj -> alloc_str();
-	obj -> set_string((char*)acsGetWebSiteString());
+	obj -> set_string((char*)acsGetNetGameString());
 
 	obj -> flags = proto -> flags;
 
@@ -478,7 +478,7 @@ void acsAddWebSiteOption(int scr_id,int item_index,int item_count)
 	ev -> MaxTimer = 1;
 
 	acsAddEventCommand(ev,ACS_EXT_EVENT,ACS_EXT_START_SOUND,EFF_MAIN_MENU_BUTTON,0,0,0);
-	acsAddEventCommand(ev,ACS_EXT_EVENT,ACS_EXT_OPEN_SITE,0,0,0,0);
+	acsAddEventCommand(ev,ACS_CHANGE_SCREEN,ACS_NET_GAME_SCR,0,0,0,0);
 
 	obj -> AddEvent(ev);
 	obj -> backup_coords();
@@ -501,9 +501,10 @@ void acsPrepare(void)
 
 	acsLoadFonts();
 
-	acsAddWebSiteOption(ACS_MAIN_MENU_SCR0,4,5);
-	acsAddWebSiteOption(ACS_MAIN_MENU_SCR1,5,6);
-	acsAddWebSiteOption(ACS_MAIN_MENU_SCR2,6,7);
+	// The website row is gone; its slot now opens the network menu.
+	acsAddNetGameOption(ACS_MAIN_MENU_SCR0,4,5);
+	acsAddNetGameOption(ACS_MAIN_MENU_SCR1,5,6);
+	acsAddNetGameOption(ACS_MAIN_MENU_SCR2,6,7);
 
 	acsScrD -> ChangeCoords((XGR_MAXX - 640)/2,(XGR_MAXY - 480)/2);
 
@@ -513,9 +514,8 @@ void acsPrepare(void)
 
 	mchInitWorldsPrm();
 
-	// The hardcoded network menu, on the screen the main menu already opens.
-	// After mchInitWorldsPrm: it needs the track dispatcher and the part
-	// flags, both of which that sets up.
+	// The hardcoded network menu screen. After mchInitWorldsPrm: it needs the
+	// track dispatcher and the part flags, both of which that sets up.
 	acsInitNetMenu();
 
 	acsInitSaveSlots();

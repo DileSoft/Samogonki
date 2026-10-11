@@ -39,16 +39,17 @@ int acsNetMenuExtEvent(int row,int dir);
 /*
 	The LAN menu, hardcoded.
 
-	The multiplayer screen is data - iscreen.scb - and that data cannot be
-	rebuilt from the repository's .SCR right now (the two no longer match,
-	see docs/net-multiplayer-plan.md, phase 6). So the screen's own rows are
-	hidden and replaced with these, built in C++ on top of the same screen and
-	drawn by the same engine: the same item look, mouse highlighting, keyboard
-	navigation and button sound as the main menu.
+	The menu strings and screens live in iscreen.scb, and that data cannot be
+	rebuilt from the repository's .SCR right now (the two no longer match, see
+	docs/net-multiplayer-plan.md, phase 6). So the network game gets a screen
+	of its own, built here in C++ and drawn by the same engine as every other
+	menu: the same item look, mouse highlighting, keyboard navigation and
+	button sound.
 
-	The screen is still the one the main menu already leads to
-	(ACS_MULTIPLAYER_SCR), so nothing about the entry point changes. What used
-	to be F2/F3 on this screen - host and join - is now the first row.
+	The screen is reached from a "Сетевая игра" item on the main menu, added
+	in the slot the website used to take (ACS_EXT.CPP). The original hot-seat
+	multiplayer screen (ACS_MULTIPLAYER_SCR, "Поочередный хот-сит" and friends)
+	is left exactly as it shipped.
 */
 
 // Row object ids. Far from anything the script uses, so a hidden leftover
@@ -86,11 +87,19 @@ static int  nm_built = 0;
 // rear, which is how the constructor orders them on screen.
 static const int nm_spell_slot[3] = { 1, 2, 3 };
 
+// Rows in the order they are shown and navigated. Labels are drawn at lx and
+// are inert; the value under each is the clickable object.
+static const int nm_row_id[]   = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
+static const int nm_label_id[] = { NM_HOST + 100,NM_ADDR + 100,NM_NAME + 100,NM_FIG + 100,
+				   NM_SP1 + 100,NM_SP2 + 100,NM_SP3 + 100,NM_WORLD + 100 };
+
+#define NM_ROWS ((int)(sizeof(nm_row_id)/sizeof(nm_row_id[0])))
+
 /* ------------------------------ helpers ---------------------------------- */
 
 static aciScreen* nm_screen(void)
 {
-	return acsScrD -> GetScreen(ACS_MULTIPLAYER_SCR);
+	return acsScrD -> GetScreen(ACS_NET_GAME_SCR);
 }
 
 static aciScreenObject* nm_obj(int id)
@@ -124,9 +133,9 @@ static const char* nm_tr(int id)
 		"Address:",			// NM_ADDR
 		"Name:",			// NM_NAME
 		"Mechos:",			// NM_FIG
-		"Spell front:",			// NM_SP1
-		"Spell middle:",		// NM_SP2
-		"Spell rear:",			// NM_SP3
+		"Front:",			// NM_SP1
+		"Middle:",			// NM_SP2
+		"Rear:",			// NM_SP3
 		"World:",			// NM_WORLD
 		"Start",			// NM_START
 		"Back"				// NM_BACK
@@ -137,9 +146,9 @@ static const char* nm_tr(int id)
 		"\xC0\xE4\xF0\xE5\xF1:",				// Адрес:
 		"\xC8\xEC\xFF:",					// Имя:
 		"\xCC\xE5\xF5\xEE\xF1:",				// Мехос:
-		"\xC7\xE0\xEA\xEB\xE8\xED\xE0\xED\xE8\xE5 \xEF\xE5\xF0\xE5\xE4:",	// Заклинание перед:
-		"\xC7\xE0\xEA\xEB\xE8\xED\xE0\xED\xE8\xE5 \xF1\xE5\xF0\xE5\xE4\xE8\xED\xE0:",	// Заклинание середина:
-		"\xC7\xE0\xEA\xEB\xE8\xED\xE0\xED\xE8\xE5 \xE7\xE0\xE4:",	// Заклинание зад:
+		"\xCF\xE5\xF0\xE5\xE4:",				// Перед:
+		"\xD1\xE5\xF0\xE5\xE4\xE8\xED\xE0:",			// Середина:
+		"\xC7\xE0\xE4:",					// Зад:
 		"\xCC\xE8\xF0:",					// Мир:
 		"\xCD\xE0\xF7\xE0\xF2\xFC",				// Начать
 		"\xCD\xE0\xE7\xE0\xE4"					// Назад
@@ -190,10 +199,43 @@ static void nm_format_value(int id,char* out,int sz)
 	(void)sz;
 }
 
+// The address is a client's, the world a host's, so the row that does not
+// apply is hidden. Navigation follows objIndex, and GetObjectXY skips a hidden
+// target, so the hidden row drops out of the list on its own.
+static void nm_apply_visibility(void)
+{
+	int i;
+
+	for(i = 0; i < NM_ROWS; i ++){
+		int show = 1;
+		aciScreenObject* v;
+		aciScreenObject* l;
+
+		if(nm_row_id[i] == NM_ADDR)  show = !nm_host;
+		if(nm_row_id[i] == NM_WORLD) show = nm_host;
+
+		v = nm_obj(nm_row_id[i]);
+		l = nm_obj(nm_label_id[i]);
+
+		if(v){
+			if(show) v -> flags &= ~(ACS_HIDDEN | ACS_BLOCKED);
+			else     v -> flags |=  (ACS_HIDDEN | ACS_BLOCKED);
+			v -> flags |= ACS_REDRAW_OBJECT;
+		}
+		if(l){
+			if(show) l -> flags &= ~(ACS_HIDDEN | ACS_BLOCKED);
+			else     l -> flags |=  (ACS_HIDDEN | ACS_BLOCKED);
+			l -> flags |= ACS_REDRAW_OBJECT;
+		}
+	}
+}
+
 // Refresh every value the state can change. Called on init and after a pick.
 static void nm_refresh(void)
 {
 	char buf[256];
+
+	nm_apply_visibility();
 
 	nm_format_value(NM_HOST,buf,sizeof(buf));  nm_set_text(NM_HOST,buf);
 	nm_format_value(NM_FIG,buf,sizeof(buf));   nm_set_text(NM_FIG,buf);
@@ -419,6 +461,10 @@ static aciScreenInputField* nm_add_field(aciScreen* scr,aciScreenInputField* pro
 	o -> AlphaDest = -1;
 	o -> dAlpha = 0;
 
+	// Keyboard and mouse selection, same as the main menu items: this is what
+	// lets the arrows find the next row and the hover highlight work.
+	o -> flags = ACS_KEYB_SELECT | ACS_MOUSE_SELECT;
+
 	o -> objIndex[0] = o -> objIndex[1] = o -> objIndex[2] = o -> objIndex[3] = 0;
 
 	o -> backup_coords();
@@ -444,36 +490,33 @@ static aciScreenInputField* nm_find_proto(void)
 	return NULL;
 }
 
-// Rows in the order they are shown and navigated. Labels are drawn at lx and
-// are inert; the value under each is the clickable object.
-static const int nm_row_id[]   = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
-static const int nm_label_id[] = { NM_HOST + 100,NM_ADDR + 100,NM_NAME + 100,NM_FIG + 100,
-				   NM_SP1 + 100,NM_SP2 + 100,NM_SP3 + 100,NM_WORLD + 100 };
-
-#define NM_ROWS ((int)(sizeof(nm_row_id)/sizeof(nm_row_id[0])))
-
 void acsInitNetMenu(void)
 {
-	aciScreen* scr = nm_screen();
+	aciScreen* scr;
 	aciScreenInputField* proto;
 	aciScreenObject* p;
 	int i,y;
 
-	if(!scr || nm_built) return;
+	if(nm_built) return;
+
+	// The screen itself. It is not in iscreen.scb, so it is created here: id
+	// ACS_NET_GAME_SCR, no background (the hot-seat screen has none either),
+	// reached from the main menu's "Сетевая игра" item.
+	if(nm_screen()) return;
+
+	scr = new aciScreen;
+	scr -> ID = ACS_NET_GAME_SCR;
+	scr -> backResID = 0;
+	acsScrD -> AddScreen(scr);
+
+	// acsPrepare already offset every other screen; this one was created after,
+	// so it gets the same shift here.
+	scr -> ChangeCoords((XGR_MAXX - 640)/2,(XGR_MAXY - 480)/2);
 
 	proto = nm_find_proto();
 
 	// Parts must be known before any spell default or cycle touches the pool.
 	nm_ensure_pool();
-	// The compiled screen still holds the rows the original game shipped
-	// (the modem-era ones). Hide every one of them: the background stays, the
-	// rows are ours. Hidden rather than deleted, so the script's own data is
-	// untouched for the day iscreen.scb is rebuilt.
-	p = (aciScreenObject*)scr -> objList -> fPtr;
-	while(p){
-		p -> flags |= ACS_HIDDEN | ACS_BLOCKED | ACS_REDRAW_OBJECT;
-		p = (aciScreenObject*)p -> next;
-	}
 
 	const int lx = 40, vx = 260, w = 340, dy = 30;
 

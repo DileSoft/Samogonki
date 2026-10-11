@@ -36,6 +36,7 @@
 #define ACS_MAIN_MENU_DUMMY_SCR2	28
 #define ACS_SPLIT_CFG_SCR		29
 #define ACS_MULTIPLAYER_SCR		30
+#define ACS_NET_GAME_SCR		150	// hardcoded LAN menu, see ACS_NET.CPP
 #define ACS_TB_CFG_SCR			31
 #define ACS_DEMO_SCR			32
 #define ACS_NA_SCR			33
