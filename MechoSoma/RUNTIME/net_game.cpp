@@ -185,6 +185,7 @@ static Vect3f net_local_auth;
 static Vect3f net_local_auth_vel;
 static float net_local_auth_yaw = 0;
 static int net_local_auth_valid = 0;
+static unsigned int net_reconcile_last = 0;
 
 // Per slot, whether the horn was held last tick. The host plays one beep per
 // press, so the relay has to fire on the rising edge too.
@@ -497,23 +498,30 @@ static mchRacer* net_racer_at(int slot)
 	the host raced on: it fell behind again at once and got snapped again, the
 	once-a-second jump. translatePose() moves the body and nothing else, so a
 	fraction of the error comes out each pass and the car eases onto the host's
-	line with no jump. Run at racer_quant_period (every 91 ms), a third of the
-	error per pass closes it in a few tenths of a second.
+	line with no jump.
 
-	A teleport (Formicary, MassShifter) or a different collision can throw the
-	car clear across the map, and easing that back would look worse than a cut,
-	so past a wide margin the host still wins outright with a snap.
+	Under a deadzone the local sim is left completely alone. Two simulations
+	fed the same input stay within a few units (measured), so correcting that
+	little every pass only drags on the car, and the driver feels it as
+	sluggish steering. Past the deadzone the pull is deliberately gentle (at
+	racer_quant_period, about a tenth per pass), so even a collision-sized
+	error closes over about a second rather than fighting the driver.
+
+	A teleport (Formicary, MassShifter) or a very different collision can throw
+	the car clear across the map, and easing that back would look worse than a
+	cut, so past a wide margin the host still wins outright with a snap.
 */
 static void net_reconcile_local(void)
 {
 	mchMechosRacer* mr;
 	const float half = (float)NET_WORLD_SIZE * 0.5f;
-	const float deadzone = 1.5f;	// trust the local sim this close
+	const float deadzone = 8.0f;	// trust the local sim this close
 	const float snap = 40.0f;	// past this, cut instead of ease
-	const float pull = 0.33f;	// fraction of the error per pass
-	const float max_pull = 5.0f;	// and a ceiling, so a big error does not warp
+	const float tau = 1.5f;		// seconds to close an error, roughly
+	const float max_pull = 3.0f;	// ceiling per pass, so a big error does not warp
 	Vect3f r,d;
-	float dx,dy,dist,step;
+	float dx,dy,dist,step,dt,f;
+	unsigned int now;
 
 	if(!net_local_auth_valid) return;
 
@@ -543,10 +551,26 @@ static void net_reconcile_local(void)
 		// setPosition() cleared the velocity; resume on the host's, or the
 		// car sits still after the cut while the host's copy drives off.
 		mr -> setGlobalVelocity(net_local_auth_vel);
+
+		net_reconcile_last = (unsigned int)clocki();
 		return;
 		}
 
-	step = dist * pull;
+	// Fraction of the error to take out this pass, from the real elapsed
+	// time. mchNetQuant runs once a frame, so a fixed fraction would close the
+	// error faster on a fast machine and drag harder - which is exactly the
+	// sluggish steering this replaced. tau seconds is the same on any frame
+	// rate.
+	now = (unsigned int)clocki();
+	dt = (float)(now - net_reconcile_last) / 1000.0f;
+	net_reconcile_last = now;
+
+	if(dt < 0.001f || dt > 0.5f) dt = 0.016f;
+
+	f = dt / tau;
+	if(f > 0.5f) f = 0.5f;
+
+	step = dist * f;
 	if(step > max_pull) step = max_pull;
 
 	d.set(dx * (step / dist),dy * (step / dist),0.0f);
@@ -1362,6 +1386,7 @@ void mchNetFinit(void)
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
+	net_reconcile_last = 0;
 	memset(net_horn_last,0,sizeof(net_horn_last));
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;

@@ -80,8 +80,14 @@ const int NET_PING_PERIOD_MS		= 1000;
 // One simulation and network tick. netWelcome::tick_rate is this expressed
 // in hertz, so 1000 / NET_TICK_MS must stay equal to the tick_rate the host
 // advertises or the agreed start tick means different times to each side.
-const int NET_TICK_MS			= 50;
-const int NET_TICK_RATE_HZ		= 1000 / NET_TICK_MS;	// 20
+//
+// Forty a second, not twenty: snapshots at this rate cost a LAN almost
+// nothing (a few tens of kbit) and halve both the staleness of a remote car
+// and how far the local car can drift from the host's copy between
+// corrections. On a slow link the interpolation buffer, not this, is what
+// would have to give.
+const int NET_TICK_MS			= 25;
+const int NET_TICK_RATE_HZ		= 1000 / NET_TICK_MS;	// 40
 
 // How long after START_GAME the race actually begins. Padding, not tuning:
 // it has to cover one retransmit plus a slow frame on the slowest machine.

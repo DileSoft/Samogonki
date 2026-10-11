@@ -1414,7 +1414,10 @@ void Mechos::keyboard_control()
 	// is moving against a local car that is parked. Real input never takes
 	// this branch.
 	if(mchNetAutoDrive){
-		apply_control(1.0f,0.4f,0);
+		// The exact setpoint the host receives, or the test measures its own
+		// mismatch: net_send_client_input sends 127 and 48, and the host
+		// decodes those back through net_input_expand().
+		apply_control(127.0f / 127.0f,48.0f / 127.0f,0);
 		return;
 		}
 
