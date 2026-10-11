@@ -148,6 +148,13 @@ static int net_start_logged = 0;
 static Vect3f net_motion_last[NET_MAX_PLAYERS];
 static int net_motion_have = 0;
 
+// Client side: the host's authoritative pose for the local car, and when it was
+// last checked against the local one. See net_reconcile_local.
+static Vect3f net_local_auth;
+static float net_local_auth_yaw = 0;
+static int net_local_auth_valid = 0;
+static unsigned int net_reconcile_ms = 0;
+
 // Input counters. input_sent is the client speaking, input_recv the host
 // hearing: two numbers that tell a silent client from a deaf host.
 static unsigned int net_input_sent_count = 0;
@@ -380,13 +387,12 @@ static void net_interp_apply(int slot,mchMechosRacer* mr)
 	mr -> setGlobalVelocity(vel);
 }
 
-// Client side, once per frame: put every racer, the local one included, on the
-// interpolated pose for now. The host is the only machine that knows where
-// anything is, so even the car under this player's hands is drawn from what
-// the host last said about it.
+// Client side, once per frame: put every remote racer on the interpolated pose
+// for now. The local car is driven by local input and is skipped.
 static void net_apply_interpolation(void)
 {
 	mchRacer* rp;
+	int local = net_match_S -> local_slot();
 	int slot = 0;
 
 	if(mchNetHost) return;
@@ -396,7 +402,7 @@ static void net_apply_interpolation(void)
 	while(rp){
 		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
 
-		if(mr)
+		if(mr && slot != local)
 			net_interp_apply(slot,mr);
 
 		rp = rp -> next;
@@ -422,6 +428,57 @@ static mchRacer* net_racer_at(int slot)
 		}
 
 	return slot == 0 ? rp : NULL;
+}
+
+/*
+	Client side: check the locally simulated car against the host, once a
+	second, and correct it only when the two have really come apart.
+
+	The local car has to be simulated here or a keypress would wait a round
+	trip, but it is the host's copy that everyone else sees, and the two do not
+	step identically. Left alone they drift until the two players are watching
+	their own car in different places. A per-frame nudge was tried and broke
+	the car's turning - it rewrote the pose the dynamics integrate from - so
+	the correction is a rare, hard snap that only fires past a threshold.
+*/
+static void net_reconcile_local(void)
+{
+	mchMechosRacer* mr;
+	const float half = (float)NET_WORLD_SIZE * 0.5f;
+	unsigned int now = (unsigned int)clocki();
+	Vect3f r;
+	float dx,dy,d2;
+
+	if(!net_local_auth_valid) return;
+
+	if((int)(now - net_reconcile_ms) < 1000) return;
+	net_reconcile_ms = now;
+
+	mr = dynamic_cast<mchMechosRacer*>(net_racer_at(net_match_S -> local_slot()));
+	if(!mr) return;
+
+	r = mr -> R();
+
+	dx = net_local_auth.x - r.x;
+	dy = net_local_auth.y - r.y;
+
+	// The world is toroidal; the short way round is the one that matters.
+	if(dx >  half) dx -= (float)NET_WORLD_SIZE;
+	if(dx < -half) dx += (float)NET_WORLD_SIZE;
+	if(dy >  half) dy -= (float)NET_WORLD_SIZE;
+	if(dy < -half) dy += (float)NET_WORLD_SIZE;
+
+	d2 = dx*dx + dy*dy;
+
+	// Twenty metres is the threshold: under it the local simulation is
+	// trusted, over it the host wins outright. Rare enough that the snap is
+	// a blink, and only when the drift has become visible anyway.
+	if(d2 < 20.0f * 20.0f) return;
+
+	net_log("client: local car %.0f units from the host, snapping",
+		Vect3f(dx,dy,0.0f).norm());
+
+	mr -> setPosition(net_local_auth,net_local_auth_yaw);
 }
 
 /*
@@ -478,16 +535,23 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		mr -> net_apply_state(racers[i].mech_state);
 
 		/*
-			The pose goes to every racer, the local one included.
-
-			It used to be skipped: the client simulated its own car so a
-			keypress did not wait a round trip. But the host simulates that car
-			too, and the two do not step identically - they drift until each
-			player is watching their own car in a different place, and every
-			spell cast near one of them lands next to the other. The host is
-			the only machine that knows where anything is, so its pose is the
-			one drawn, local car and all.
+			The local car keeps its own simulation: a keypress that waited a
+			round trip would feel dead, and that is the whole reason it is
+			simulated here. The host's pose is kept only to check it against,
+			once a second - see net_reconcile_local.
 		*/
+		if(racers[i].slot == net_match_S -> local_slot()){
+			net_local_auth.set(net_uq_world(racers[i].pos_x),
+					   net_uq_world(racers[i].pos_y),
+					   net_uq_height(racers[i].pos_z));
+			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
+			net_local_auth_valid = 1;
+			continue;
+			}
+
+		// Buffered, not applied: the draw interpolates between the last two
+		// snapshots a fixed delay behind the newest. See
+		// net_apply_interpolation.
 		net_interp_remember(racers[i].slot,hdr.server_tick,
 				    Vect3f(net_uq_world(racers[i].pos_x),
 					   net_uq_world(racers[i].pos_y),
@@ -930,6 +994,8 @@ void mchNetFinit(void)
 	net_start_logged = 0;
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
+	net_local_auth_valid = 0;
+	net_reconcile_ms = 0;
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;
 	net_event_q_count = 0;
@@ -1177,6 +1243,11 @@ void mchNetQuant(void)
 	// snapshots are already in the buffer.
 	net_apply_interpolation();
 
+	// The local car is simulated here, but once a second it is checked against
+	// the host's copy and pulled back if the two have really come apart.
+	if(!mchNetHost)
+		net_reconcile_local();
+
 	// Events go out on the same tick as the input, so that a spell and the
 	// steering that went with it are one story. A client queues them in
 	// mchNetArcaneCast; a host queues visual broadcasts in
@@ -1251,20 +1322,19 @@ void mchNetQuant(void)
 			}
 
 		/*
-			Every racer is pose-driven from the host, the local car included:
-			the server is the source of truth, so nothing on this machine is
-			simulated. Each one is marked net-controlled so its own physics
-			does not also steer it - two simulators on one car is jitter and a
-			pose that disagrees with the host.
-
-			The keyboard is still read from the local car, to send; it just
-			does not drive the body here.
+			Every remote racer is pose-driven from the host and marked
+			net-controlled so its own physics does not also steer it - two
+			simulators on one car is jitter and a pose that disagrees with the
+			host. The local car is the exception: it is simulated here, from
+			the keyboard, and only checked against the host once a second.
 		*/
 		rp = mch_raceD -> racerLst -> first();
 
 		while(rp){
 			mch_raceD -> AI_Toggle(rp,0);
-			rp -> set_net_control(1);
+
+			if(slot != net_match_S -> local_slot())
+				rp -> set_net_control(1);
 
 			rp = rp -> next;
 			slot ++;
