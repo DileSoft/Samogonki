@@ -123,8 +123,7 @@ static int wait_line(lobbyServer& srv,TestConn& c,char* out,int sz,int timeout_m
 
 		if(nl){
 			*nl = 0;
-			strncpy(out,c.buf,sz - 1);
-			out[sz - 1] = 0;
+			snprintf(out,sz,"%s",c.buf);
 
 			int rem = c.len - (int)(nl + 1 - c.buf);
 			memmove(c.buf,nl + 1,rem);

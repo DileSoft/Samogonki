@@ -388,6 +388,10 @@ static netSocketHandle netSocketSetNonBlocking(netSocketHandle s)
 
 int netSocketStartup(void)
 {
+	// Nothing to start on POSIX. The call keeps the shared error helper in
+	// use on this branch too, so it does not compile to an unused function.
+	(void)netSocketLastError();
+
 	return 1;
 }
 

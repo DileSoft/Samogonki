@@ -35,7 +35,7 @@ COPY MechoSoma/RUNTIME/net_socket.cpp \
 RUN g++ -std=c++17 -O2 -Wall -pthread -static-libgcc -static-libstdc++ \
         -ILobbyServer -IMechoSoma/RUNTIME \
         LobbyServer/main.cpp LobbyServer/lobby_server.cpp MechoSoma/RUNTIME/net_socket.cpp \
-        -o /out/moonshine-lobby
+        -o moonshine-lobby
 
 # ------------------------------ runtime stage ------------------------------
 FROM debian:bookworm-slim
@@ -43,7 +43,7 @@ FROM debian:bookworm-slim
 # Not root: the server listens on an unprivileged port and touches nothing.
 RUN useradd --system --uid 10001 --no-create-home lobby
 
-COPY --from=build /out/moonshine-lobby /usr/local/bin/moonshine-lobby
+COPY --from=build /src/moonshine-lobby /usr/local/bin/moonshine-lobby
 
 # The control channel is TCP and the rendezvous channel is UDP, on the same
 # number. Publishing only one of them is the classic way to make this look
