@@ -111,6 +111,27 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 
 	if(!owner) return;
 
+	// Every client object built from here to the clear at the bottom is tagged
+	// with this arcane, so the stop event can find and kill it later. See
+	// fxlabClientArcaneStop.
+	fxlabClientSetArcaneScope(owner_id,arcane_id);
+
+	/*
+		Feature arcanes. Their whole visual is the car itself - wings, a
+		helicopter rotor, a dragon wind - set on the Mechos by the host's
+		Start(). The client runs the same call so its copy of the car matches;
+		the stop event resets it. Nothing else about these arcanes is visible.
+	*/
+	switch(arcane_id){
+		case ARCANE050: owner -> set_feature(Mechos::DRAGON_POWER); break;
+		case ARCANE051: owner -> set_feature(Mechos::HELICOPTER); break;
+		case ARCANE052: owner -> set_feature(Mechos::JABASOMA); break;
+		case ARCANE059: owner -> set_feature(Mechos::BUTTERFLY); break;
+		case ARCANE060: owner -> set_feature(Mechos::DIRIGIBLE); break;
+		case ARCANE038: owner -> set_feature(Mechos::IRON_HIP); break;
+		default: break;
+		}
+
 	switch(arcane_id){
 		//Petard: the throw. The burst is a later interrupt.
 		case ARCANE002:
@@ -449,7 +470,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			break;
 
 		//SnowFall
-		case ARCANE063:
+		case ARCANE064:
 			Position = owner->R();
 			{
 				Vect3f v = owner->Yglobal() * 1.8f;
@@ -475,6 +496,8 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		default:
 			break;
 	}
+
+	fxlabClientSetArcaneScope(-1,-1);
 }
 
 /*
@@ -575,6 +598,67 @@ void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const Vect3f& Positio
 	}
 }
 
+/*
+	Client side: the arcane is over, so take its visual down.
+
+	The mirror of fxlabClientArcaneStart. Every object that function built was
+	tagged with (owner, arcane); this kills them all. Short effects are already
+	gone and SetAlive(0) on a dead object costs nothing, so only the lasting
+	ones - the links bound to the car, a storm's clouds - are what this really
+	does. It also puts back any feature the cast changed on the car.
+*/
+void fxlabClientArcaneStop(int arcane_id,int owner_id)
+{
+	mchRacer* n;
+	mchMechosRacer* owner = NULL;
+	std::list<fxlabGeneralObjectType*>::iterator it;
+
+	if(!fxlabClientD) return;
+
+	it = fxlabClientD -> ObjectList.begin();
+	while(it != fxlabClientD -> ObjectList.end()){
+		fxlabGeneralObjectType* t = *it;
+
+		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id)
+			t -> SetAlive(0);
+
+		++ it;
+		}
+
+	it = fxlabClientD -> CreateList.begin();
+	while(it != fxlabClientD -> CreateList.end()){
+		fxlabGeneralObjectType* t = *it;
+
+		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id)
+			t -> SetAlive(0);
+
+		++ it;
+		}
+
+	if(!mch_raceD || !mch_raceD -> racerLst) return;
+
+	n = mch_raceD -> racerLst -> first();
+	while(n){
+		if(n -> ID == owner_id && n -> Type == MCH_RACER_TYPE_MECHOS){
+			owner = static_cast<mchMechosRacer*>(n);
+			break;
+			}
+		n = n -> next;
+		}
+
+	if(!owner) return;
+
+	switch(arcane_id){
+		case ARCANE050: owner -> reset_feature(Mechos::DRAGON_POWER); break;
+		case ARCANE051: owner -> reset_feature(Mechos::HELICOPTER); break;
+		case ARCANE052: owner -> reset_feature(Mechos::JABASOMA); break;
+		case ARCANE059: owner -> reset_feature(Mechos::BUTTERFLY); break;
+		case ARCANE060: owner -> reset_feature(Mechos::DIRIGIBLE); break;
+		case ARCANE038: owner -> reset_feature(Mechos::IRON_HIP); break;
+		default: break;
+		}
+}
+
 void fxlabGeneralArcaneType::Open()
 {
 	fxlabServerSpaceType::Open();
@@ -654,6 +738,11 @@ void fxlabGeneralArcaneType::Close()
 {
 //	if(mchCurrentWorld == FXLAB_ARCANE_DEMO_WORLD)
 //		LinkPoint->Power = LinkPoint->MaxPower;
+
+	// Both endings meet here - the arcane running out of power and the host
+	// being told to stop it - so this is the one place to tell the clients
+	// their mirror visual is done. No-op off the host.
+	mchNetArcaneVisualStop(RacerID,ArcaneID);
 
 	fxlabArcaneStop(static_cast<ArcaneStatisticsInfo*>(this));
 	fxlabServerSpaceType::Close();

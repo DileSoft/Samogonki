@@ -12,6 +12,12 @@ struct fxlabGeneralObjectType
 	float CurrentTime; // Relativity Time
 	float StartTime,FinishTime; // Absolute Time
 
+	// Net: which arcane built this client object, so a stop can find it. Set
+	// only by the client-side arcane mirror; -1 means untagged. See
+	// fxlabClientArcaneStart and fxlabClientArcaneStop.
+	int NetArcaneOwner;
+	int NetArcaneID;
+
 	fxlabGeneralObjectType()
 	{ 
 		ID = 0;
@@ -19,6 +25,8 @@ struct fxlabGeneralObjectType
 		Alive = 1;
 		CurrentTime = StartTime = 0;
 		FinishTime = -1.0f;
+		NetArcaneOwner = -1;
+		NetArcaneID = -1;
 	};
 
 	virtual ~fxlabGeneralObjectType(){};
@@ -220,6 +228,13 @@ struct fxlabClientObjectDispatcher : fxlabGeneralObjectDispatcher
 
 extern fxlabClientObjectDispatcher* fxlabClientD;
 extern fxlabServerObjectDispatcher* fxlabServerD;
+
+/*
+	Tags every client object created until the next call, so that the arcane
+	mirror can be stopped later by (owner, arcane). Passing -1,-1 ends the
+	scope. Client only; see fxlabClientArcaneStart.
+*/
+void fxlabClientSetArcaneScope(int owner_id,int arcane_id);
 
 extern float fxlabServerQuantPeriod;
 extern float fxlabGlobalTimeRate;

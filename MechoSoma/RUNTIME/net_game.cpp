@@ -801,6 +801,43 @@ void mchNetArcaneInterrupt(int ownerID,int arcane_id,float x,float y,float z)
 }
 
 /*
+	Host side: an arcane has ended; its cast visual should come down everywhere.
+
+	Same addressing as a cast (slot + arcane id), and reliable for the same
+	reason: a lost stop leaves a spell drawn on a client forever. Only the
+	look travels - the host's own visual is killed by the arcane's Close().
+*/
+void mchNetArcaneVisualStop(int ownerID,int arcane_id)
+{
+	netEvent* e;
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != ownerID){
+		rp = rp -> next;
+		slot ++;
+	}
+
+	if(!rp) return;
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = NET_EV_ARCANE_STOP_VISUAL;
+	e -> slot = (unsigned char)slot;
+	e -> arcane_id = (unsigned char)arcane_id;
+}
+
+/*
 	Client side: an arcane somebody else cast. Build only its visual.
 
 	The sender is skipped: it already built its own visual the moment it
@@ -812,7 +849,8 @@ static void net_apply_visual_event(const netEvent* e)
 	mchRacer* rp;
 	int slot = 0;
 
-	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT) return;
+	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT &&
+	   e -> type != NET_EV_ARCANE_STOP_VISUAL) return;
 	if(e -> slot >= NET_MAX_PLAYERS) return;
 
 	net_log("client: visual arcane %d type %d slot %d",(int)e -> arcane_id,(int)e -> type,(int)e -> slot);
@@ -825,6 +863,13 @@ static void net_apply_visual_event(const netEvent* e)
 	}
 
 	if(!rp || rp -> Type != MCH_RACER_TYPE_MECHOS) return;
+
+	if(e -> type == NET_EV_ARCANE_STOP_VISUAL){
+		// The arcane is over. Kill the mirror visual this machine built for
+		// it, and put back any feature it changed on the car.
+		fxlabClientArcaneStop(e -> arcane_id,rp -> ID);
+		return;
+		}
 
 	if(e -> type == NET_EV_ARCANE_INTERRUPT){
 		/*
@@ -935,9 +980,11 @@ void mchNetStart(void)
 	net_match_S -> set_handler(net_game_handler,NULL);
 
 	// Projectiles travel as their own message types and are tracked by entity
-	// id, which is per match: the table starts empty.
+	// id, which is per match. The registry is NOT reset here: it was cleared
+	// before the world was built (see GameQuantRTO::Init) so that the walking
+	// actors the host placed during the load are still in it and get
+	// replicated. Clearing it now would silently drop every one of them.
 	net_fx_set_session(net_session_S);
-	net_fx_reset();
 	net_interp_reset();
 
 	// Zero asks for an ephemeral port, which is what a host wants: the
@@ -1286,8 +1333,14 @@ void mchNetQuant(void)
 		net_last_player_count = players;
 		net_camera_set = 0;
 
-		if(mchNetHost)
+		if(mchNetHost){
 			net_update_ai();
+
+			// A client that has just joined has never seen the world's
+			// actors: their spawns went out before it was there. Send them
+			// all again so the newcomer's track is not empty.
+			net_fx_resend_actors();
+			}
 
 		net_log("%s: roster now %d player(s), state %d",
 			mchNetHost ? "host" : "client",players,net_match_S -> state());
@@ -1297,9 +1350,12 @@ void mchNetQuant(void)
 		net_apply_host_inputs();
 
 		// Snapshots only exist on the host: it is the only machine that knows
-		// where anything is.
-		if(net_match_S -> state() == NET_MATCH_RUNNING)
+		// where anything is. The actors go the same way, and only from here:
+		// a pass before the match is running would spawn them to nobody.
+		if(net_match_S -> state() == NET_MATCH_RUNNING){
 			net_send_snapshot();
+			net_fx_update_actors();
+			}
 
 		if(net_match_S -> state() != NET_MATCH_LOBBY)
 			mchNetStatusText = "Racing";

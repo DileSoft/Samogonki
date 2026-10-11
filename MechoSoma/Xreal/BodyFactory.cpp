@@ -2,6 +2,7 @@
 
 #include "BodyFactory.h"
 #include "BodyDispatcher.h"
+#include "net_fx.h"
 #include "Body.h"
 #include "ControlledObject.h"
 #include "PointControlledObject.h"
@@ -131,6 +132,13 @@ int BodyFactory::sizeOf(const char* type_name)
 
 Body* BodyDispatcher::createBody(const char* type_name, const Vect3f& pose, int angle)
 {
+	// Client, net race: the world's own walking actors are not built here.
+	// The host owns them and replicates them as class C; a second local set
+	// would stand next to the host's in the wrong places. Everything else
+	// (projectiles, parts, scenery) goes through as usual. See net_fx.h.
+	if(net_world_block_actor(type_name))
+		return NULL;
+
 	Body* b = body_factory(type_name);
 	if(angle == -1000)
 		angle = random(360);

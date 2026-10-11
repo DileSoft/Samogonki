@@ -53,6 +53,19 @@ void net_fx_reset(void);
 void net_fx_attach(Body* body);
 
 /*
+	Client side: should the world's own walking actors be built here at all?
+
+	Called from BodyDispatcher::createBody with the factory name. During a net
+	race the client builds none of them - the host owns every bonus man and
+	creature and replicates it as class C - so this returns 1 for an actor name
+	and drops the local one before it is made. Without it the client would put
+	its own random set on the track next to the host's, twice the creatures in
+	wrong places. Returns 0 for anything that is not an actor, and for the one
+	createBody a class C spawn itself makes (see net_fx_create).
+*/
+int net_world_block_actor(const char* factory_name);
+
+/*
 	Host side: the next body attached is born with this client-side visual, an
 	FXLAB_CLIENT_PROCESS_* type, or -1 for none. The engine builds some bodies
 	and their visual together (fxlabCreateBolide); the body travels by mesh and
@@ -83,5 +96,17 @@ void net_fx_actor_recv(const unsigned char* data,unsigned int len);
 	sent".
 */
 void net_fx_stats(int* projectiles,int* actors);
+
+/*
+	Host side: replicate the tracked actors' poses once, throttled internally
+	to NET_ACTOR_REPL_HZ. Driven from the game layer and only while the match
+	is running, so no actor is ever marked spawned before a client is there to
+	receive it.
+*/
+void net_fx_update_actors(void);
+
+// Host side: clear the "already spawned" flag on every actor so the next
+// update pass sends them all again. For a player who joins mid-race.
+void net_fx_resend_actors(void);
 
 #endif /* __NET_FX_H__ */

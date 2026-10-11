@@ -78,6 +78,16 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id);
 */
 void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const class Vect3f& pos);
 
+/*
+	Client side: the arcane ended on the host, so drop the visual built for it.
+
+	Kills every client object the cast mirror tagged with this (owner, arcane),
+	and puts back any feature the cast applied to the car. Start and stop are
+	the only two moments a mirror object's life is decided, so this is the
+	counterpart to fxlabClientArcaneStart and nothing else.
+*/
+void fxlabClientArcaneStop(int arcane_id,int owner_id);
+
 int fxlabLine2SphereDist(const class Vect3f& r1,const class Vect3f& c,float rad);
 
 int fxlabGetWorldReflectionEnable();

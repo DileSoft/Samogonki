@@ -91,6 +91,12 @@ static int net_fx_pending_link = -1;
 // The type of the next factory-built body, or 0. See net_fx_set_pending_body.
 static int net_fx_pending_type = 0;
 
+// Set while net_fx_create is building a class C actor from a spawn, so that
+// the client-side suppression in net_world_block_actor lets that one through.
+// Every other createBody on a client in a net race is a world actor and is
+// dropped.
+static int net_fx_spawn_building = 0;
+
 static void net_fx_flush_spawn(void);
 static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link);
 static void net_fx_pending_drain(void);
@@ -122,6 +128,7 @@ void net_fx_reset(void)
 	net_fx_actor_ms = 0;
 	net_fx_pending_link = -1;
 	net_fx_pending_type = 0;
+	net_fx_spawn_building = 0;
 }
 
 /*
@@ -208,6 +215,26 @@ static const char* net_fx_actor_name(int type,int variant)
 			return net_fx_actor_defs[i].name;
 
 	return NULL;
+}
+
+/*
+	Client side: suppress the local build of a world actor.
+
+	Only a client in a net race suppresses, and only actor names - everything
+	else (projectiles, parts, scenery) is built as usual. net_fx_create clears
+	the check for the single createBody it makes for a replicated actor.
+*/
+int net_world_block_actor(const char* factory_name)
+{
+	if(!mchNetGame || mchNetHost) return 0;
+	if(net_fx_spawn_building) return 0;
+	if(!factory_name) return 0;
+
+	for(int i = 0; net_fx_actor_defs[i].name; i ++)
+		if(!strcmp(net_fx_actor_defs[i].name,factory_name))
+			return 1;
+
+	return 0;
 }
 
 /*
@@ -450,7 +477,7 @@ static void net_fx_queue_actor(const netFxEntry* e,const Body* b)
 	spawn is sent once and then never again, so an actor that walks out of
 	range and back is not respawned - it simply stops and starts moving.
 */
-static void net_fx_update_actors(void)
+void net_fx_update_actors(void)
 {
 	unsigned int now = (unsigned int)clocki();
 
@@ -487,6 +514,21 @@ static void net_fx_update_actors(void)
 		}
 
 	net_fx_flush_actors();
+}
+
+/*
+	Host side: forget that the actors were already spawned, so the next
+	net_fx_update_actors pass queues them again.
+
+	Called when a player joins. Without it a client that connects after the
+	host already sent the world's actors never receives them: each one is
+	spawned once and then never again, and the first send went to nobody.
+*/
+void net_fx_resend_actors(void)
+{
+	for(int i = 0; i < net_fx_count; i ++)
+		if(net_fx_table[i].is_actor)
+			net_fx_table[i].spawn_sent = 0;
 }
 
 static void net_fx_flush_spawn(void)
@@ -765,7 +807,12 @@ static void net_fx_create(const netSpawn* s)
 		and replaces it, which is far less jarring than appearing at the
 		origin.
 	*/
+	// This is the one createBody on a client that must go through: the actor
+	// is the host's, arriving as a spawn, not a local world one to be dropped.
+	int saved_building = net_fx_spawn_building;
+	net_fx_spawn_building = 1;
 	p = Mdisp -> createBody(name,pos,G2R(0));
+	net_fx_spawn_building = saved_building;
 
 	if(!p) return;
 
@@ -950,8 +997,11 @@ void net_fx_quant(void)
 		}
 
 	if(mchNetHost){
+		// The spawn batch is flushed here; the actor pass itself is driven
+		// from the game layer, and only once the match is running - see
+		// mchNetQuant. Spawning actors before any client has connected would
+		// mark them sent into the void.
 		net_fx_flush_spawn();
-		net_fx_update_actors();
 		}
 
 	/*

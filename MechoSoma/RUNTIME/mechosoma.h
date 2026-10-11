@@ -181,6 +181,16 @@ void mchNetArcaneBroadcast(int ownerID,int arcane_id);
 */
 void mchNetArcaneInterrupt(int ownerID,int arcane_id,float x,float y,float z);
 
+/*
+	Host side: an arcane has ended, so every client should drop the visual it
+	built for the cast. Called from fxlabGeneralArcaneType::Close(), which runs
+	both when the arcane expires on its own and when it is interrupted - the
+	one place both endings meet. Without it a client-side mirror of a lasting
+	effect (a link on the car, a storm's clouds) is built once and never
+	removed. No-op off the host.
+*/
+void mchNetArcaneVisualStop(int ownerID,int arcane_id);
+
 // Read only, for the UI. All safe to call with no session running.
 int  mchNetIsActive(void);
 int  mchNetState(void);

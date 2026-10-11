@@ -574,6 +574,20 @@ void fxlabClientObjectDispatcher::Quant()
 //	fff < "Client " <= ObjectList.size() < " , " <= CreateList.size() < "\n";
 };
 
+/*
+	The tag an arcane mirror puts on the client objects it builds. Non-negative
+	owner means tagging is on; CreateObject reads it. See
+	fxlabClientSetArcaneScope and fxlabClientArcaneStart.
+*/
+static int fxlabClientScopeOwner = -1;
+static int fxlabClientScopeArcane = -1;
+
+void fxlabClientSetArcaneScope(int owner_id,int arcane_id)
+{
+	fxlabClientScopeOwner = owner_id;
+	fxlabClientScopeArcane = arcane_id;
+}
+
 fxlabGeneralObjectType* fxlabClientObjectDispatcher::CreateObject(int type)
 {
 	fxlabGeneralObjectType* p = NULL;
@@ -978,6 +992,14 @@ fxlabGeneralObjectType* fxlabClientObjectDispatcher::CreateObject(int type)
 	CreateList.push_back(p);
 	p->Open();
 	p->SetType(type);
+
+	// If an arcane mirror is building, remember which one, so its stop can
+	// find this object again. Untagged objects keep -1 and are never touched.
+	if(fxlabClientScopeOwner >= 0){
+		p -> NetArcaneOwner = fxlabClientScopeOwner;
+		p -> NetArcaneID = fxlabClientScopeArcane;
+		}
+
 	return p;
 };
 

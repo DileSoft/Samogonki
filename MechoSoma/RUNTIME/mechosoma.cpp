@@ -44,6 +44,8 @@
 
 #include "mechosoma.h"
 
+#include "net_fx.h"
+
 #include "ResourceDispatcher.h"
 #include "Xreal_utl.h"
 #include "TexMgr.h"
@@ -773,6 +775,14 @@ void GameQuantRTO::Init(int id)
 
 		camera_dispatcher -> clear();
 		if(mchSplitScreenGame && camera_dispatcher2) camera_dispatcher2 -> clear();
+
+		// The entity registry is cleared before the world is built, not after.
+		// The world load places the walking actors (Xreal_init, the per-world
+		// constructors) and the host registers each one as it is created; a
+		// reset afterwards would throw them all away and none of them would
+		// ever replicate. See net_fx.h and mchNetStart.
+		if(mchNetGame)
+			net_fx_reset();
 
 		Xreal_init();
 
