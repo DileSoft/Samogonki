@@ -107,7 +107,7 @@ enum {
 // the command line so -nethost / -netjoin keep working as a shortcut for
 // testing.
 static int  nm_host = 1;
-static int  nm_conn = 0;		// 0 direct, 1 through the lobby server
+static int  nm_conn = 1;		// 0 direct, 1 through the lobby server (default)
 static char nm_addr[128] = "127.0.0.1";		// direct: the host to join
 // Lobby: the server address. Saved to game.ini under [network] lobby_server,
 // so the same server is remembered between runs.
@@ -186,7 +186,7 @@ static const char* nm_label_str(int row)
 {
 	switch(row){
 		case NM_HOST:     return nm_pick("Mode:","\xD0\xE5\xE6\xE8\xEC:");
-		case NM_CONN:     return nm_pick("Link:","\xD1\xE2\xFF\xF7\xFC:");
+		case NM_CONN:     return nm_pick("Link:","\xD1\xE2\xFF\xE7\xFC:");
 		case NM_ADDR:     return nm_conn ? nm_pick("Lobby:","\xCB\xEE\xE1\xE1\xE8:")
 						 : nm_pick("Address:","\xC0\xE4\xF0\xE5\xF1:");
 		case NM_NAME:     return nm_pick("Name:","\xC8\xEC\xFF:");
@@ -946,7 +946,8 @@ void acsInitNetMenu(void)
 
 	// Seed the two editable rows once, now that their state is known. They are
 	// never written again on refresh, so a typed name survives a mechos pick.
-	nm_set_text(NM_ADDR,nm_addr);
+	// The address object starts on whichever meaning the default mode uses.
+	nm_set_text(NM_ADDR,nm_conn ? nm_lobby_addr : nm_addr);
 	nm_set_text(NM_NAME,nm_name[0] ? nm_name : "-");
 
 	nm_refresh();
