@@ -179,6 +179,10 @@ static float net_local_auth_yaw = 0;
 static int net_local_auth_valid = 0;
 static unsigned int net_reconcile_ms = 0;
 
+// Per slot, whether the horn was held last tick. The host plays one beep per
+// press, so the relay has to fire on the rising edge too.
+static int net_horn_last[NET_MAX_PLAYERS];
+
 // Input counters. input_sent is the client speaking, input_recv the host
 // hearing: two numbers that tell a silent client from a deaf host.
 static unsigned int net_input_sent_count = 0;
@@ -1021,7 +1025,8 @@ static void net_apply_visual_event(const netEvent* e)
 	int slot = 0;
 
 	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT &&
-	   e -> type != NET_EV_ARCANE_STOP_VISUAL && e -> type != NET_EV_ARCANE_LATCH) return;
+	   e -> type != NET_EV_ARCANE_STOP_VISUAL && e -> type != NET_EV_ARCANE_LATCH &&
+	   e -> type != NET_EV_HORN) return;
 	if(e -> slot >= NET_MAX_PLAYERS) return;
 
 	net_log("client: visual arcane %d type %d slot %d",(int)e -> arcane_id,(int)e -> type,(int)e -> slot);
@@ -1034,6 +1039,14 @@ static void net_apply_visual_event(const netEvent* e)
 	}
 
 	if(!rp || rp -> Type != MCH_RACER_TYPE_MECHOS) return;
+
+	if(e -> type == NET_EV_HORN){
+		// The honker sounds its own horn from its own controls; every other
+		// machine hears it from here, at that car's position.
+		if(e -> slot != net_match_S -> local_slot())
+			static_cast<mchMechosRacer*>(rp) -> beep();
+		return;
+		}
 
 	if(e -> type == NET_EV_ARCANE_STOP_VISUAL){
 		// The arcane is over. Kill the mirror visual this machine built for
@@ -1230,6 +1243,7 @@ void mchNetFinit(void)
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
 	net_reconcile_ms = 0;
+	memset(net_horn_last,0,sizeof(net_horn_last));
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;
 	net_event_q_count = 0;
@@ -1297,6 +1311,21 @@ static void net_apply_host_inputs(void)
 		netInput in;
 
 		if(slot != NET_SLOT_HOST && net_match_S -> get_input(slot,&in)){
+			int horn = (in.buttons & NET_BTN_HORN) ? 1 : 0;
+			netEvent* e;
+
+			// The host's own copy sounds one beep per press (apply_control
+			// tracks the edge), and every other client should hear exactly
+			// that, so the relay fires on the edge too.
+			if(horn && !net_horn_last[slot] && net_event_q_count < NET_MAX_EVENT_PER_PACKET){
+				e = &net_event_q[net_event_q_count ++];
+				memset(e,0,sizeof(netEvent));
+				e -> type = NET_EV_HORN;
+				e -> slot = (unsigned char)slot;
+				}
+
+			net_horn_last[slot] = horn;
+
 			rp -> set_net_input(in);
 			net_input_recv_count ++;
 			}
