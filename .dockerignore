@@ -1,0 +1,12 @@
+# The lobby image copies only three source files and two headers out of the
+# tree, so keep the build context from shipping everything else to the daemon.
+.git
+.gitignore
+build*/
+bin/
+3rdparty/
+ScriptTool/
+*.exe
+*.dll
+*.pdb
+*.log

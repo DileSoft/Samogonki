@@ -1,0 +1,20 @@
+# Run the lobby server with both ports published.
+#
+#   cd LobbyServer
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# Both the TCP control port and the UDP rendezvous port must be published on
+# the same number; a client that can reach only TCP never gets an endpoint.
+
+services:
+  lobby:
+    build:
+      context: ..
+      dockerfile: LobbyServer/Dockerfile
+    image: moonshine-lobby:latest
+    container_name: moonshine-lobby
+    ports:
+      - "8510:8510/tcp"
+      - "8510:8510/udp"
+    restart: unless-stopped
