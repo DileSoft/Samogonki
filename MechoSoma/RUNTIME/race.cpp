@@ -894,6 +894,11 @@ void mchInitRaceDispatcher(void)
 		if(!(rs0 -> flags & MCH_RACER_MECHOS_CFG))
 			rs0 -> GetMechos(1);
 
+		// The network menu's pick overrides the random mechos the pool just
+		// handed the local racer. The string is "figure sp1 sp2 sp3".
+		if(mchNetGame && mchNetRacerConfig[0])
+			rs0 -> SetMechos(mchNetRacerConfig);
+
 		rs = mch_racerLst.first();
 		while(rs){
 			if(!(rs -> flags & MCH_RACER_MECHOS_CFG))

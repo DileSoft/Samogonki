@@ -94,6 +94,7 @@
 #define ACS_EXT_CHANGE_PLAYER			54
 #define ACS_EXT_INIT_ONLINE_MENU		55
 #define ACS_EXT_OPEN_SITE			56
+#define ACS_EXT_NET_MENU			57
 
 // Options
 #define ACS_OPT_RESOLUTION			0

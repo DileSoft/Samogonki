@@ -142,6 +142,19 @@ extern char mchNetJoinAddr[128];
 extern int mchNetPort;
 extern const char* mchNetStatusText;
 
+/*
+	The network menu's pick, filled in before a race arms and read at race
+	init. figure is the mechos figure id (1..acsMaxEssenceID), spell the part
+	ids of the three spell slots, world/track the host's choice. config is the
+	"figure sp1 sp2 sp3" string the race loader wants. name is the player's.
+*/
+extern int mchNetMenuFigure;
+extern int mchNetMenuSpell[3];
+extern int mchNetMenuWorld;
+extern int mchNetMenuTrack;
+extern char mchNetRacerConfig[30];
+extern char mchNetMenuName[32];
+
 void mchNetStart(void);
 void mchNetFinit(void);
 void mchNetQuant(void);

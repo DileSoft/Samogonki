@@ -140,6 +140,18 @@ char mchNetJoinAddr[128] = "127.0.0.1";
 int mchNetPort = NET_DEFAULT_PORT;
 
 /*
+	The network menu's pick. Zero means "not chosen": a race armed from the
+	command line only (-nethost / -netjoin / -netrace) leaves these empty and
+	falls back to the old defaults, so the test entry point is unchanged.
+*/
+int mchNetMenuFigure = 0;
+int mchNetMenuSpell[3] = { 0, 0, 0 };
+int mchNetMenuWorld = -1;
+int mchNetMenuTrack = -1;
+char mchNetRacerConfig[30] = "";
+char mchNetMenuName[32] = "";
+
+/*
 	The world a net race runs, and the only one until a lobby can pick one.
 
 	The menus are what normally choose the world, and a net race has no screen
@@ -156,8 +168,10 @@ extern int mchCurrentTrack;
 
 void mchNetArmRaceWorld(void)
 {
-	mchCurrentWorld = NET_RACE_WORLD;
-	mchCurrentTrack = NET_RACE_TRACK;
+	// The menu's pick wins when there is one; the -netrace path leaves it
+	// unset and keeps the fixed world.
+	mchCurrentWorld = (mchNetMenuWorld >= 0) ? mchNetMenuWorld : NET_RACE_WORLD;
+	mchCurrentTrack = (mchNetMenuTrack >= 0) ? mchNetMenuTrack : NET_RACE_TRACK;
 }
 
 const char* mchNetStatusText = "";
@@ -1372,7 +1386,7 @@ void mchNetStart(void)
 
 	if(mchNetHost){
 		net_session_S -> host();
-		net_match_S -> open_host("host",
+		net_match_S -> open_host(mchNetMenuName[0] ? mchNetMenuName : "host",
 					 (unsigned char)mchCurrentWorld,
 					 (unsigned char)mchCurrentTrack,
 					 (unsigned char)mchNumLaps);
@@ -1655,7 +1669,7 @@ void mchNetQuant(void)
 			net_last_connect_ms = now;
 
 			if(net_session_S -> connect(mchNetJoinAddr,mchNetPort))
-				net_match_S -> open_client("player");
+				net_match_S -> open_client(mchNetMenuName[0] ? mchNetMenuName : "player");
 			}
 		}
 

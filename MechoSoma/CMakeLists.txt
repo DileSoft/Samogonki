@@ -474,6 +474,7 @@ set(GAME_SOURCES
     iScreen/SCRIPTS/SCR_DEFS.H
     iScreen/ACS_CORE.CPP
     iScreen/ACS_EXT.CPP
+    iScreen/ACS_NET.CPP
     iScreen/HFONT.CPP
     iScreen/HFONT.H
     iScreen/I-World.cpp
