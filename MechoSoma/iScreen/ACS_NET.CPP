@@ -114,7 +114,9 @@ static char nm_addr[128] = "127.0.0.1";		// direct: the host to join
 static char nm_lobby_addr[128] = "dilesoft.ru";
 static char nm_lobby_saved[128] = "";		// last value written, to avoid rewrites
 static char nm_name[32]  = "";
-static char nm_game[NET_GAME_NAME_LEN] = "";
+// The lobby shows the game name; an empty one is a blank line everybody has
+// to guess at, so it starts with a default the host can edit.
+static char nm_game[NET_GAME_NAME_LEN] = "moonshine";
 static int  nm_fig = 1;			// mechos figure, 1..acsMaxEssenceID
 static int  nm_sp[3] = { 1, 1, 1 };	// spell part ids, slots front/middle/rear
 static int  nm_world = 1;
@@ -944,11 +946,17 @@ void acsInitNetMenu(void)
 	if(mchCurrentWorld >= 0)
 		nm_world = mchCurrentWorld;
 
-	// Seed the two editable rows once, now that their state is known. They are
+	// Seed the editable rows once, now that their state is known. They are
 	// never written again on refresh, so a typed name survives a mechos pick.
 	// The address object starts on whichever meaning the default mode uses.
 	nm_set_text(NM_ADDR,nm_conn ? nm_lobby_addr : nm_addr);
 	nm_set_text(NM_NAME,nm_name[0] ? nm_name : "-");
+
+	// The game name is live from the field, so seeding it here is what makes
+	// the default reach both the host's own lobby and the name it advertises.
+	nm_set_text(NM_GAMENAME,nm_game);
+	strncpy(nm_game_pushed,nm_game,sizeof(nm_game_pushed) - 1);
+	nm_game_pushed[sizeof(nm_game_pushed) - 1] = 0;
 
 	nm_refresh();
 
