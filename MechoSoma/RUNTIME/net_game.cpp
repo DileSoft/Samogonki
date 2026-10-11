@@ -20,6 +20,10 @@
 #include <cstdio>
 #include <cstring>
 
+// sound.h pulls the audio stack, which this file has no other use for. One
+// declaration is enough for the pause undo below.
+extern void mchResumeSound(void);
+
 /*
 	Net races write a running log to net.log, next to the binary.
 
@@ -1415,6 +1419,23 @@ void mchNetQuant(void)
 
 	if(!mchNetHost && net_client_ready)
 		net_send_client_input();
+
+	/*
+		A net race cannot be paused, by VK_PAUSE or by anything else.
+
+		The host is the only simulation there is, so a freeze on any machine
+		stops the snapshots every machine draws from; a frozen client also
+		stops answering. Whatever set mchFreezeTime during a running race is
+		undone here, before the simulation step that would honour it.
+
+		Before the start the freeze is deliberate: it is how the start tick
+		holds every car still - so only a running match is unpaused.
+	*/
+	if(net_match_S -> state() == NET_MATCH_RUNNING && mchFreezeTime){
+		mchFreezeTime = 0;
+		mchResumeSound();
+		net_log("%s: ignored a pause during the race",mchNetHost ? "host" : "client");
+		}
 
 	/* ---------------------------- start tick ---------------------------- */
 

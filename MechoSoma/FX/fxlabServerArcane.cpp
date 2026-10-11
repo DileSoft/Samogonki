@@ -143,6 +143,11 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		case ARCANE059: owner -> set_feature(Mechos::BUTTERFLY); break;
 		case ARCANE060: owner -> set_feature(Mechos::DIRIGIBLE); break;
 		case ARCANE038: owner -> set_feature(Mechos::IRON_HIP); break;
+		//RevoltSpace and FireTrack are features too: their whole visual is the
+		//car, and fxlabRevoltSpace::Start / fxlabArcaneRedTrack::Start are the
+		//calls that set it.
+		case ARCANE014: owner -> set_feature(Mechos::MAGNETIC_CUSHION); break;
+		case ARCANE011: owner -> set_feature(Mechos::RED_TRACK_FEATURE); break;
 		default: break;
 		}
 
@@ -391,6 +396,39 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		case ARCANE037:
 			Position = owner->R();
 			fxlabClientArcaneSoundImpulse(Position,EFF_TITANIUM_BALLS);
+			break;
+
+		/*
+			VoodooMaster: the heads are server-only damage objects, and each one
+			owns a client link that draws the orbiting head (see
+			fxlabServerVoodooHead::Start). A client never runs a server process,
+			so those links never get made and the whole arcane is invisible.
+			Rebuilt here, one per head, spaced the way the host spaces them.
+
+			The latch onto a victim does not travel: a mirrored head keeps
+			orbiting instead of freezing where it hit. Cosmetic only.
+		*/
+		case ARCANE039:
+			{
+				int i;
+				float a = 0,da = 2.0f * M_PI / FXLAB_VOOODOO_MASTER_OBJECT_NUM;
+
+				Position = owner->part_coords(M3D_FRONT);
+
+				for(i = 0;i < FXLAB_VOOODOO_MASTER_OBJECT_NUM;i++){
+					t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_VOODOO_MASTER_LINK,
+								 owner_id,arcane_id);
+					t->SetStartTime(fxlabClientD->GetTime());
+					t->SetPosition(Position);
+					t->SetAngle(a);
+					t->SetDeltaAngle((M_PI / 20.0f) / fxlabServerTimeRate);
+					t->SetRadius(50.0f);
+					t->SetMechosPoint(owner);
+					t->Start();
+
+					a += da;
+				}
+			}
 			break;
 
 		//FireBall: the ball is a body and travels as class B.
@@ -667,6 +705,8 @@ void fxlabClientArcaneStop(int arcane_id,int owner_id)
 		case ARCANE059: owner -> reset_feature(Mechos::BUTTERFLY); break;
 		case ARCANE060: owner -> reset_feature(Mechos::DIRIGIBLE); break;
 		case ARCANE038: owner -> reset_feature(Mechos::IRON_HIP); break;
+		case ARCANE014: owner -> reset_feature(Mechos::MAGNETIC_CUSHION); break;
+		case ARCANE011: owner -> reset_feature(Mechos::RED_TRACK_FEATURE); break;
 		default: break;
 		}
 }
