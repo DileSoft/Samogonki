@@ -1839,6 +1839,13 @@ int mchRaceDispatcher::checkEndGame(void)
 	if(mchPBEM_Game)
 		return online_checkEndGame();
 
+	// A net client does not decide when the race is over: the host owns every
+	// car's progress and broadcasts GAME_OVER, which ends the race here too
+	// (net_apply_game_over). Ending locally would let a divergent local finish
+	// cut the race short for this machine while the host races on.
+	if(mchNetGame && !mchNetHost)
+		return 0;
+
 	if(mchGameMode == MCH_SINGLE_GAME){
 		if(mch_demoD.is_enabled() && mchTimeMode != MCH_TIME_GAME_OVER){
 			p = racerLst -> first();
