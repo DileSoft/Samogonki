@@ -276,6 +276,14 @@ int mchImgRTO_ActiveFlag = 0;
 int ErrHExcept = 1;
 int pause;
 
+/*
+	Set while the in-race menu is shown over a live net race. The race and the
+	network keep running; only the local keyboard goes to the menu. See
+	GameQuantRTO::Quant - it draws the menu and returns before the race's own
+	key handling.
+*/
+int mchNetMenu = 0;
+
 int xgrInitFlags = XGR_EXCLUSIVE | XGR_HICOLOR;
 #ifdef GPX
 int xgrInitMode = MCH_1152x864;		// startup videomode
@@ -1043,6 +1051,47 @@ int GameQuantRTO::Quant(void)
 
 	mch_demoD.quant();
 
+	if(mchNetMenu){
+		int mk;
+		int mret = 0;
+
+		/*
+			The in-race menu, drawn over a live race. Everything above has
+			already run - the network quant, the race simulation, the client
+			fx - so the race carries on while this is up. Only the local
+			keyboard is taken here, and Escape puts the menu away again.
+		*/
+		while(KeyBuf -> size){
+			mk = KeyBuf -> get();
+
+			if(mk == VK_ESCAPE){
+				mchNetMenu = 0;
+				acsFinit();
+				XGR_MouseSetMoveHandler(mchMouseMove);
+				break;
+				}
+
+			acsScrD -> KeyTrap(mk);
+			}
+
+		if(mchNetMenu){
+			mret = acsScrD -> Quant();
+			acsScrD -> RedrawQuant();
+
+			if(mret == -1)
+				quantRTO -> NextID = XT_TERMINATE_ID;
+			else if(mret != 0){
+				// Anything else is an action that would restart or replace
+				// the race, which a live session cannot do. Close and stay.
+				mchNetMenu = 0;
+				acsFinit();
+				XGR_MouseSetMoveHandler(mchMouseMove);
+				}
+			}
+
+		return NextID;
+		}
+
 	start_timer(IVG_Draw, STAT_TOTAL);
 // действия до начала сцены (в частности кэширование)
 	gb_IVisGeneric->SetTime(global_time());
@@ -1645,16 +1694,23 @@ void mchKeyTrap(void)
 			switch(id){
 				case MCH_KEY_EXIT:
 					/*
-						Escape, and a net race has no way out to the menu.
-
-						The session is live: leaving here ends this machine's
-						half of it, its snapshots stop, and every other machine
-						freezes on the last pose it saw - which is exactly the
-						"pause freezes the race" this was. A net race ends when
-						the race ends, or when the window is closed.
+						Escape. In a net race this shows the same menu the
+						single-player game shows, but over the running race:
+						the host's simulation and this machine's network keep
+						going, and only the local keyboard goes to the menu.
+						Leaving for the main menu here instead would end this
+						machine's half of the session and freeze every other
+						one on the last pose it saw.
 					*/
 					if(mchNetGame){
-						mchNetWriteLog("host: escape ignored during the race");
+						if(!mchNetMenu){
+							mchNetMenu = 1;
+							acsScrD -> curScrID = (iWorldMode) ? ACS_MAIN_MENU_SCR4 : ACS_MAIN_MENU_SCR3;
+							acsScrD -> SetFlush();
+							acsCreateWater();
+							acsInit();
+							}
+						KeyBuf -> clear();
 						break;
 						}
 
