@@ -148,12 +148,6 @@ static int net_start_logged = 0;
 static Vect3f net_motion_last[NET_MAX_PLAYERS];
 static int net_motion_have = 0;
 
-// Client side: the host's authoritative pose for the local car, from the last
-// snapshot. See net_reconcile_local.
-static Vect3f net_local_auth;
-static float net_local_auth_yaw = 0;
-static int net_local_auth_valid = 0;
-
 // Input counters. input_sent is the client speaking, input_recv the host
 // hearing: two numbers that tell a silent client from a deaf host.
 static unsigned int net_input_sent_count = 0;
@@ -430,54 +424,6 @@ static mchRacer* net_racer_at(int slot)
 }
 
 /*
-	Client side: keep the local car near where the host says it is.
-
-	The local car is simulated from local input, which is what makes it feel
-	immediate, but the host simulates it too and the two do not step identically
-	- a client and a host running at different frame rates drift apart over a
-	race until each player is watching their own car in a different place. The
-	host's position is the truth, so the local car is pulled toward it: a nudge
-	when the gap is small, a snap when it is large.
-*/
-static void net_reconcile_local(void)
-{
-	mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(net_racer_at(net_match_S -> local_slot()));
-	const float half = (float)NET_WORLD_SIZE * 0.5f;
-	Vect3f r;
-	float dx,dy,dz,d2;
-
-	if(!net_local_auth_valid || !mr) return;
-
-	r = mr -> R();
-
-	dx = net_local_auth.x - r.x;
-	dy = net_local_auth.y - r.y;
-	dz = net_local_auth.z - r.z;
-
-	// The world is toroidal; the short way round is the one that matters.
-	if(dx >  half) dx -= (float)NET_WORLD_SIZE;
-	if(dx < -half) dx += (float)NET_WORLD_SIZE;
-	if(dy >  half) dy -= (float)NET_WORLD_SIZE;
-	if(dy < -half) dy += (float)NET_WORLD_SIZE;
-
-	d2 = dx*dx + dy*dy;
-
-	// Under two metres is noise, and nothing is worth doing about it.
-	if(d2 < 4.0f) return;
-
-	// Four hundred is a machine that has been off the wire. Put it where the
-	// host has it rather than easing across the map in front of everybody.
-	if(d2 > 400.0f * 400.0f){
-		mr -> setPosition(net_local_auth,mr -> psi());
-		return;
-		}
-
-	// Otherwise close a fifth of the gap a frame: fast enough to catch up in
-	// sight, slow enough that the car is not yanked.
-	mr -> setPosition(Vect3f(r.x + dx * 0.2f,r.y + dy * 0.2f,r.z + dz * 0.2f),mr -> psi());
-}
-
-/*
 	Client side: put the host's view of a racer onto the local copy.
 
 	Pose goes only to the other machines. The local racer is driven by local
@@ -531,17 +477,7 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		// its own explosion on every other machine.
 		mr -> net_apply_state(racers[i].mech_state);
 
-		if(racers[i].slot == local){
-			// Kept, not applied: the local car is simulated locally, and this
-			// is the host's word on where it actually is. net_reconcile_local
-			// uses it to stop the two from drifting apart.
-			net_local_auth.set(net_uq_world(racers[i].pos_x),
-					   net_uq_world(racers[i].pos_y),
-					   net_uq_height(racers[i].pos_z));
-			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
-			net_local_auth_valid = 1;
-			continue;
-			}
+		if(racers[i].slot == local) continue;
 
 		// Buffered, not applied: the draw interpolates between the last two
 		// snapshots a fixed delay behind the newest. See
@@ -988,7 +924,6 @@ void mchNetFinit(void)
 	net_start_logged = 0;
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
-	net_local_auth_valid = 0;
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;
 	net_event_q_count = 0;
@@ -1235,11 +1170,6 @@ void mchNetQuant(void)
 	// between the last two snapshots. After the pump, so this frame's
 	// snapshots are already in the buffer.
 	net_apply_interpolation();
-
-	// The local car is not interpolated, but it is not left to drift either:
-	// the host's position pulls it back. See net_reconcile_local.
-	if(!mchNetHost)
-		net_reconcile_local();
 
 	// Events go out on the same tick as the input, so that a spell and the
 	// steering that went with it are one story. A client queues them in
