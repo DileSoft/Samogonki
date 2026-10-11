@@ -92,6 +92,9 @@ set(GAME_SOURCES
     RUNTIME/mechosoma.cpp
     RUNTIME/mechosoma.h
     RUNTIME/net_input.h
+    RUNTIME/net_lobby.cpp
+    RUNTIME/net_lobby.h
+    RUNTIME/net_lobby_protocol.h
     RUNTIME/net_actor.h
     RUNTIME/net_event.h
     RUNTIME/net_fx.cpp

@@ -86,6 +86,20 @@ public:
 	// Client side: aim at a server and prime the handshake.
 	int connect(const char* server,int port);
 
+	// The same, by numeric address: the lobby hands back an already resolved
+	// endpoint, and re-resolving a dotted quad is pointless.
+	int connect_addr(unsigned int ip,unsigned short port);
+
+	// Host side: send a bare ping to an address that is not a peer yet, so a
+	// NAT opens before the joining machine's own handshake can arrive. Keeps
+	// a peer record for the address, so the answer lands on it.
+	int punch(unsigned int ip,unsigned short port);
+
+	// One datagram with no transport header, on the session's own socket. The
+	// lobby probe uses it: the server must observe the exact socket the race
+	// will run on, which a second socket would not be.
+	int send_raw(unsigned int ip,unsigned short port,const void* data,unsigned int len);
+
 	void quant(void);
 
 	int send(int peer_id,int type,const void* data,unsigned int len,int reliable = 0);

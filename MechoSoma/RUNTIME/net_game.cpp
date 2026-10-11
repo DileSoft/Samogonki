@@ -9,6 +9,8 @@
 #include "net_fx.h"
 #include "net_spawn.h"
 #include "net_event.h"
+#include "net_lobby.h"
+#include "net_lobby_protocol.h"
 
 #include "mechosoma.h"
 #include "race.h"
@@ -19,6 +21,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 // sound.h pulls the audio stack, which this file has no other use for. One
 // declaration is enough for the pause undo below.
@@ -187,6 +190,23 @@ static int net_client_ready = 0;
 static int net_last_player_count = -1;
 static int net_camera_set = 0;
 static int net_start_logged = 0;
+
+/*
+	Lobby server client state. Declared here, above mchNetLobbyQuant, because
+	that function has to know whether a lobby connection owns the dial or the
+	typed address does. The implementation is further down, next to the rest of
+	the lobby API.
+*/
+static netLobbyClient* net_lobby_S = NULL;
+static int net_lobby_mode = 0;		// the menu chose the server, not a direct address
+static int net_lobby_browse = 0;	// client: the match list is up
+static int net_lobby_joined = 0;	// client: the server introduced a host
+static unsigned int net_lobby_probe_ms = 0;
+static unsigned int net_lobby_list_ms = 0;
+static int net_lobby_reg_players = -1;	// host: last player count registered
+static int net_lobby_host_known = 0;
+static unsigned int net_lobby_host_ip = 0;
+static unsigned short net_lobby_host_port = 0;
 
 // Last sampled position per slot, so the periodic log can say whether the
 // field is actually driving or just sitting there.
@@ -1473,8 +1493,9 @@ void mchNetLobbyQuant(void)
 
 	// A client retries the connection until the welcome hands it a slot. The
 	// HELLO is reliable, so resending it on the retry is harmless and covers
-	// a lost one.
-	if(!mchNetHost && net_match_S -> local_slot() < 0 &&
+	// a lost one. Not in lobby mode: there the host is not the typed address
+	// but whatever the server introduces, and mchNetMenuPump dials it.
+	if(!mchNetHost && !net_lobby_mode && net_match_S -> local_slot() < 0 &&
 	   (int)(now - net_last_connect_ms) >= NET_CONNECT_RETRY_MS){
 		net_last_connect_ms = now;
 
@@ -1513,6 +1534,10 @@ void mchNetLobbyHostStart(void)
 	mchTurnBasedGame = 0;
 
 	net_match_S -> force_start();
+
+	// The race is starting; the match no longer needs advertising, and a
+	// client that dialed in is already connected.
+	mchNetLobbyServerHangup();
 }
 
 // Client saw the host's prepare: adopt the world the host chose so both sides
@@ -1581,6 +1606,258 @@ int mchNetLobbyStarted(void)
 
 	return net_match_S -> state() == NET_MATCH_STARTING ||
 	       net_match_S -> state() == NET_MATCH_RUNNING;
+}
+
+/* --------------------------- lobby server client -------------------------- */
+
+/*
+	The rendezvous server, on top of the menu lobby.
+
+	The session still comes up exactly as it does on a LAN - open_host or
+	open_client - and the race is unchanged. What the server adds is the
+	introduction: it learns each game's public UDP endpoint from a probe on
+	the game's own socket, and when a client asks to join a match it hands each
+	side the other's endpoint. Both then punch outward, the NATs open, and the
+	ordinary HELLO/WELCOME handshake runs over the result.
+
+	net_lobby_S owns only the TCP control channel. The probe leaves
+	net_session_S's socket, so it is sent from here.
+*/
+
+// "host", "host:port" or a bare address. Returns the port, and copies the host
+// into out.
+static unsigned short net_lobby_split_addr(const char* addr,char* out,int out_sz)
+{
+	const char* colon = addr ? strrchr(addr,':') : NULL;
+	unsigned short port = (unsigned short)LOBBY_DEFAULT_PORT;
+
+	if(!addr || !addr[0]){
+		strncpy(out,"127.0.0.1",out_sz - 1);
+		out[out_sz - 1] = 0;
+		return port;
+	}
+
+	if(colon && colon != addr){
+		int n = (int)(colon - addr);
+		if(n > out_sz - 1) n = out_sz - 1;
+		memcpy(out,addr,n);
+		out[n] = 0;
+		port = (unsigned short)atoi(colon + 1);
+	}
+	else {
+		strncpy(out,addr,out_sz - 1);
+		out[out_sz - 1] = 0;
+	}
+
+	return port;
+}
+
+static void net_lobby_ensure(void)
+{
+	if(!net_lobby_S) net_lobby_S = new netLobbyClient;
+}
+
+// Host: open the host session as usual, then register it with the server.
+int mchNetLobbyServerHost(const char* lobby_addr,const char* host_name,
+			  const char* game_name,int figure,const int* spells)
+{
+	char host[128];
+	unsigned short port;
+
+	if(!mchNetLobbyHost(host_name,game_name,figure,spells)) return 0;
+
+	net_lobby_mode = 1;
+	net_lobby_browse = 0;
+	net_lobby_joined = 0;
+	net_lobby_reg_players = -1;
+
+	net_lobby_ensure();
+
+	port = net_lobby_split_addr(lobby_addr,host,sizeof(host));
+	net_lobby_S -> dial(host,port);
+
+	return 1;
+}
+
+// Client: open the client session as usual so the game socket exists (the
+// probe needs it), then connect to the server and browse.
+int mchNetLobbyServerJoin(const char* lobby_addr,const char* player_name,
+			  int figure,const int* spells)
+{
+	char host[128];
+	unsigned short port;
+
+	if(!mchNetLobbyJoin("",player_name,figure,spells)) return 0;
+
+	net_lobby_mode = 1;
+	net_lobby_browse = 1;
+	net_lobby_joined = 0;
+	net_lobby_host_known = 0;
+	net_lobby_list_ms = 0;
+
+	net_lobby_ensure();
+
+	port = net_lobby_split_addr(lobby_addr,host,sizeof(host));
+	net_lobby_S -> dial(host,port);
+
+	return 1;
+}
+
+void mchNetLobbyServerHangup(void)
+{
+	if(net_lobby_S) net_lobby_S -> close();
+
+	net_lobby_mode = 0;
+	net_lobby_browse = 0;
+	net_lobby_joined = 0;
+	net_lobby_host_known = 0;
+	net_lobby_reg_players = -1;
+}
+
+/*
+	One frame of the server channel. Called while the network screen is up,
+	whatever phase it is in, because the host registers and the client lists
+	from the setup/browse phases, not only from the in-session lobby.
+*/
+void mchNetMenuPump(void)
+{
+	unsigned int now;
+
+	if(!net_lobby_S) return;
+
+	net_lobby_S -> pump();
+
+	now = (unsigned int)clocki();
+
+	// The probe, from the game's own socket. Repeated, because a lost UDP
+	// probe would otherwise leave the server with no endpoint to hand out.
+	if(net_lobby_S -> ready() && net_session_S){
+		if((int)(now - net_lobby_probe_ms) >= 500){
+			char buf[64];
+			int n;
+
+			net_lobby_probe_ms = now;
+			n = snprintf(buf,sizeof(buf),"%s%s\n",
+				     LOBBY_PROBE_PREFIX,net_lobby_S -> token());
+
+			net_session_S -> send_raw(net_lobby_S -> server_ip(),
+						  net_lobby_S -> server_port(),
+						  buf,(unsigned int)n);
+		}
+	}
+
+	// Host: keep the advertised player count current.
+	if(mchNetHost && net_lobby_S -> ready() && net_match_S){
+		int players = net_match_S -> num_players();
+
+		if(players != net_lobby_reg_players){
+			// The world is the menu's pick; mchCurrentWorld is only fixed
+			// once the host presses start, which is later than this.
+			int world = (mchNetMenuWorld >= 0) ? mchNetMenuWorld
+				  : (mchCurrentWorld >= 0 ? mchCurrentWorld : NET_RACE_WORLD);
+
+			net_lobby_reg_players = players;
+			net_lobby_S -> register_match(mchNetGameName(),
+						      world,
+						      mchNumLaps > 0 ? mchNumLaps : 5,
+						      players,NET_MAX_PLAYERS);
+		}
+	}
+
+	// Client: refresh the list while browsing.
+	if(!mchNetHost && net_lobby_browse && net_lobby_S -> ready()){
+		if((int)(now - net_lobby_list_ms) >= 2000){
+			net_lobby_list_ms = now;
+			net_lobby_S -> request_list();
+		}
+	}
+
+	// Introductions.
+	{
+		netLobbyPeer p;
+
+		while(net_lobby_S -> pop_peer(&p)){
+			if(mchNetHost){
+				// Punch outward so the client's HELLO can get in through
+				// this side's NAT. A few, because the first may be eaten.
+				for(int i = 0; i < 4 && net_session_S; i ++)
+					net_session_S -> punch(p.ip,p.port);
+			}
+			else {
+				net_lobby_host_ip = p.ip;
+				net_lobby_host_port = p.port;
+				net_lobby_host_known = 1;
+				net_lobby_joined = 1;
+
+				// Seated: no reason to keep listing matches.
+				net_lobby_browse = 0;
+			}
+		}
+	}
+
+	// Client: dial the host the server named, retrying until seated.
+	if(net_lobby_mode && !mchNetHost && net_lobby_host_known &&
+	   net_session_S && net_match_S && net_match_S -> local_slot() < 0){
+		if((int)(now - net_last_connect_ms) >= NET_CONNECT_RETRY_MS){
+			net_last_connect_ms = now;
+
+			if(net_session_S -> connect_addr(net_lobby_host_ip,net_lobby_host_port))
+				net_match_S -> open_client(mchNetMenuName[0] ? mchNetMenuName : "player");
+		}
+	}
+}
+
+/* ------------------------------ browse view ------------------------------- */
+
+int mchNetLobbyBrowseState(void){ return net_lobby_S ? net_lobby_S -> state() : NET_LOBBY_IDLE; }
+const char* mchNetLobbyBrowseStatus(void){ return net_lobby_S ? net_lobby_S -> status() : ""; }
+int mchNetLobbyClientJoined(void){ return net_lobby_joined; }
+
+int mchNetLobbyMatchCount(void)
+{
+	return net_lobby_S ? net_lobby_S -> match_count() : 0;
+}
+
+const char* mchNetLobbyMatchName(int index)
+{
+	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
+	return m ? m -> name : "";
+}
+
+int mchNetLobbyMatchId(int index)
+{
+	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
+	return m ? (int)m -> id : -1;
+}
+
+int mchNetLobbyMatchPlayers(int index)
+{
+	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
+	return m ? (int)m -> players : 0;
+}
+
+int mchNetLobbyMatchMax(int index)
+{
+	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
+	return m ? (int)m -> max_players : 0;
+}
+
+int mchNetLobbyMatchWorld(int index)
+{
+	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
+	return m ? (int)m -> world : -1;
+}
+
+void mchNetLobbyBrowseRefresh(void)
+{
+	net_lobby_list_ms = 0;
+	if(net_lobby_S) net_lobby_S -> request_list();
+}
+
+void mchNetLobbyBrowseJoin(int index)
+{
+	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
+	if(m && !net_lobby_joined) net_lobby_S -> join(m -> id);
 }
 
 void mchNetStart(void)
@@ -1661,6 +1938,17 @@ void mchNetFinit(void)
 	net_event_q_count = 0;
 
 	mchNetStatusText = "";
+
+	if(net_lobby_S){
+		delete net_lobby_S;
+		net_lobby_S = NULL;
+	}
+
+	net_lobby_mode = 0;
+	net_lobby_browse = 0;
+	net_lobby_joined = 0;
+	net_lobby_host_known = 0;
+	net_lobby_reg_players = -1;
 
 	net_log("net race end");
 	net_log_close();

@@ -10,6 +10,7 @@
 #include "net_spawn.h"
 #include "net_actor.h"
 #include "net_event.h"
+#include "net_lobby.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -1543,6 +1544,132 @@ static int net_test_leave(FILE* f)
 	return ok;
 }
 
+/*
+	Lobby server client test: the real netLobbyClient against a stub server
+	kept in this file. The stub is not the real lobby, but it speaks the same
+	lines, so what is under test is the client half of the wire format - dial,
+	HELLO, the ready transition, match line parsing and the peer queue - which
+	the server's own self test cannot reach from the other side.
+*/
+static int net_test_client_lobby(FILE* f)
+{
+	netSocket listener;
+	netSocket conn = NET_SOCKET_INVALID;
+	netLobbyClient lob;
+	unsigned short port = 0;
+	unsigned int ip = 0;
+	char srv_in[1024];
+	int srv_len = 0;
+	int got_ready = 0,got_match = 0,got_peer = 0;
+	unsigned short peer_port = 0;
+	int listed = 0;
+	int ok;
+
+	netSocketStartup();
+
+	listener = netSocketTcpListen(0);
+	if(listener == NET_SOCKET_INVALID){
+		net_logf(f,"FAIL clientlobby: listen: %s",netSocketError());
+		return 0;
+	}
+
+	netSocketLocalAddr(listener,NULL,&port);
+	netSocketResolve("127.0.0.1",&ip);
+
+	lob.dial("127.0.0.1",port);
+
+	unsigned int t0 = clocki();
+
+	while(clocki() - t0 < 5000){
+		if(conn == NET_SOCKET_INVALID)
+			conn = netSocketTcpAccept(listener,NULL,NULL);
+
+		lob.pump();
+
+		if(conn != NET_SOCKET_INVALID){
+			for(;;){
+				char buf[512];
+				int n = netSocketTcpRecv(conn,buf,sizeof(buf));
+
+				if(n <= 0) break;
+
+				if(srv_len + n < (int)sizeof(srv_in)){
+					memcpy(srv_in + srv_len,buf,n);
+					srv_len += n;
+					srv_in[srv_len] = 0;
+				}
+			}
+
+			char* start = srv_in;
+
+			for(;;){
+				char* nl = strchr(start,'\n');
+				if(!nl) break;
+
+				*nl = 0;
+
+				if(!strncmp(start,"HELLO",5)){
+					const char* r = "HELLO 1 TOKEN12345\n";
+					netSocketTcpSend(conn,r,(int)strlen(r));
+				}
+				else if(!strncmp(start,"REGISTER",8)){
+					const char* r = "REGISTERED 7\n";
+					netSocketTcpSend(conn,r,(int)strlen(r));
+				}
+				else if(!strncmp(start,"LIST",4)){
+					const char* r = "LIST 1\nMATCH 7 1 5 1 5 Stub Match\nEND\n";
+					netSocketTcpSend(conn,r,(int)strlen(r));
+				}
+				else if(!strncmp(start,"JOIN",4)){
+					const char* r = "PEER 127.0.0.1 9999\n";
+					netSocketTcpSend(conn,r,(int)strlen(r));
+				}
+
+				start = nl + 1;
+			}
+
+			int rem = (int)strlen(start);
+			if(start != srv_in) memmove(srv_in,start,rem + 1);
+			srv_len = rem;
+		}
+
+		if(lob.ready() && !got_ready){
+			got_ready = 1;
+			lob.request_list();
+		}
+
+		if(lob.match_count() > 0 && !listed){
+			const netLobbyMatch* m = lob.match(0);
+
+			listed = 1;
+			got_match = m && !strcmp(m -> name,"Stub Match");
+			if(m && m -> id == 7) lob.join(m -> id);
+		}
+
+		{
+			netLobbyPeer p;
+			if(lob.pop_peer(&p)){
+				got_peer = 1;
+				peer_port = p.port;
+			}
+		}
+
+		if(got_peer) break;
+
+		netSleep(2);
+	}
+
+	ok = got_ready && got_match && got_peer && peer_port == 9999;
+
+	net_logf(f,"clientlobby: ready=%d match=%d peer=%d port=%u",
+		got_ready,got_match,got_peer,(unsigned)peer_port);
+
+	if(conn != NET_SOCKET_INVALID) netSocketClose(conn);
+	netSocketClose(listener);
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -1567,6 +1694,7 @@ int net_selftest(void)
 	int got_lobby = 0;
 	int got_menulobby = 0;
 	int got_leave = 0;
+	int got_client_lobby = 0;
 	int got_snapshot = 0;
 	int got_spawn = 0;
 	int got_actor = 0;
@@ -1603,6 +1731,10 @@ int net_selftest(void)
 	got_leave = net_test_leave(f);
 	if(!got_leave)
 		net_logf(f,"FAIL net_test_leave");
+
+	got_client_lobby = net_test_client_lobby(f);
+	if(!got_client_lobby)
+		net_logf(f,"FAIL net_test_client_lobby");
 
 	got_snapshot = net_test_snapshot(f);
 	if(!got_snapshot)
@@ -1770,12 +1902,12 @@ int net_selftest(void)
 	if(!got_event)
 		net_logf(f,"FAIL net_test_event");
 
-	ok = (got_welcome && got_fragment && got_input && got_lobby && got_menulobby && got_leave && got_snapshot && got_spawn && got_actor && got_event && host_reliable == 1 &&
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_menulobby && got_leave && got_client_lobby && got_snapshot && got_spawn && got_actor && got_event && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d menulobby=%d leave=%d snapshot=%d spawn=%d actor=%d event=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_menulobby,got_leave,got_snapshot,got_spawn,got_actor,got_event);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d menulobby=%d leave=%d clientlobby=%d snapshot=%d spawn=%d actor=%d event=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_menulobby,got_leave,got_client_lobby,got_snapshot,got_spawn,got_actor,got_event);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

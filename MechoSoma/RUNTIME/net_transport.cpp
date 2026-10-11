@@ -205,16 +205,10 @@ void netSession::host(void)
 
 int netSession::connect(const char* server,int port)
 {
-	netEndpoint* ep;
 	netAddr addr;
 
 	if(!server || !*server){
 		set_status("No server address");
-		return 0;
-	}
-
-	if(_state == NET_STATE_HOSTING){
-		set_status("Already hosting");
 		return 0;
 	}
 
@@ -225,6 +219,22 @@ int netSession::connect(const char* server,int port)
 		set_status(netSocketError());
 		return 0;
 	}
+
+	return connect_addr(addr.ip,addr.port);
+}
+
+int netSession::connect_addr(unsigned int ip,unsigned short port)
+{
+	netEndpoint* ep;
+	netAddr addr;
+
+	if(_state == NET_STATE_HOSTING){
+		set_status("Already hosting");
+		return 0;
+	}
+
+	addr.ip = ip;
+	addr.port = port;
 
 	ep = get_peer_by_addr(addr);
 	if(!ep)
@@ -250,6 +260,43 @@ int netSession::connect(const char* server,int port)
 	// A ping is the handshake bootstrap: retransmitted until the host answers
 	// with a WELCOME, which is how this survives a dropped first packet.
 	queue_reliable(ep,NET_MSG_PING,NULL,0);
+
+	return 1;
+}
+
+int netSession::punch(unsigned int ip,unsigned short port)
+{
+	netAddr addr;
+	netEndpoint* ep;
+
+	addr.ip = ip;
+	addr.port = port;
+
+	ep = get_peer_by_addr(addr);
+	if(!ep)
+		ep = alloc_peer(addr,0);
+
+	if(!ep) return 0;
+
+	ep -> hasAddr = 1;
+	ep -> status = NET_EP_CONNECTING;
+
+	// Start the timeout clock, or a punch that never lands would keep a dead
+	// peer in the roster forever (a zero lastRecvTime means "no timeout").
+	ep -> lastRecvTime = (unsigned int)clocki();
+
+	return raw_send(addr,NET_MSG_PING,0,ep -> sendSeq ++,ep -> recvSeq,NULL,0);
+}
+
+int netSession::send_raw(unsigned int ip,unsigned short port,const void* data,unsigned int len)
+{
+	if(_sock == NET_SOCKET_INVALID) return 0;
+	if(!data || !len) return 0;
+
+	if(netSocketSend(_sock,ip,port,data,(int)len) < 0)
+		return 0;
+
+	_sentPackets ++;
 
 	return 1;
 }

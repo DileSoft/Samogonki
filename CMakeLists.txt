@@ -5,6 +5,7 @@ project(MOONSHINE_RUNNERS VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CONFIGURATION_TYPES "Release;Debug;MinSizeRel;RelWithDebInfo")
 
 option(BUILD_SCRIPT_TOOL "Build script tool" OFF)
+option(BUILD_LOBBY_SERVER "Build the lobby server console app" ON)
 
 set(APPLICATION_NAME moonshine-runners)
 
@@ -42,6 +43,10 @@ add_subdirectory(3rdparty/iniparser)
 add_subdirectory(3rdparty/musepack_src_r475)
 
 add_subdirectory(MechoSoma)
+
+if(BUILD_LOBBY_SERVER)
+    add_subdirectory(LobbyServer)
+endif(BUILD_LOBBY_SERVER)
 
 if(BUILD_SCRIPT_TOOL)
     add_subdirectory(ScriptTool)

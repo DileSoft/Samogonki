@@ -92,6 +92,7 @@ enum {
 	NM_STATUS,
 	NM_ACTION,
 	NM_BACK,
+	NM_CONN,
 
 	NM_LAST
 };
@@ -106,7 +107,9 @@ enum {
 // the command line so -nethost / -netjoin keep working as a shortcut for
 // testing.
 static int  nm_host = 1;
-static char nm_addr[128] = "127.0.0.1";
+static int  nm_conn = 0;		// 0 direct, 1 through the lobby server
+static char nm_addr[128] = "127.0.0.1";		// direct: the host to join
+static char nm_lobby_addr[128] = "127.0.0.1";	// lobby: the server address
 static char nm_name[32]  = "";
 static char nm_game[NET_GAME_NAME_LEN] = "";
 static int  nm_fig = 1;			// mechos figure, 1..acsMaxEssenceID
@@ -115,6 +118,7 @@ static int  nm_world = 1;
 
 static int  nm_built = 0;
 static int  nm_lobby = 0;		// the session is up, the roster is shown
+static int  nm_browse = 0;		// client: the server's match list is shown
 static char nm_game_pushed[NET_GAME_NAME_LEN] = "";
 
 // The three spell slots are part indices 1..3 of the mechos: index 0 is the
@@ -179,7 +183,9 @@ static const char* nm_label_str(int row)
 {
 	switch(row){
 		case NM_HOST:     return nm_pick("Mode:","\xD0\xE5\xE6\xE8\xEC:");
-		case NM_ADDR:     return nm_pick("Address:","\xC0\xE4\xF0\xE5\xF1:");
+		case NM_CONN:     return nm_pick("Link:","\xD1\xE2\xFF\xF7\xFC:");
+		case NM_ADDR:     return nm_conn ? nm_pick("Lobby:","\xCB\xEE\xE1\xE1\xE8:")
+						 : nm_pick("Address:","\xC0\xE4\xF0\xE5\xF1:");
 		case NM_NAME:     return nm_pick("Name:","\xC8\xEC\xFF:");
 		case NM_FIG:      return nm_pick("Mechos:","\xCC\xE5\xF5\xEE\xF1:");
 		case NM_SP1:      return nm_pick("Front:","\xCF\xE5\xF0\xE5\xE4:");
@@ -199,9 +205,18 @@ static const char* nm_title_str(void)
 
 static const char* nm_action_str(void)
 {
-	if(!nm_lobby)
-		return nm_host ? nm_pick("Create","\xD1\xEE\xE7\xE4\xE0\xF2\xFC \xE8\xE3\xF0\xF3")
+	if(nm_browse)
+		return nm_pick("Refresh","\xCE\xE1\xED\xEE\xE2\xE8\xF2\xFC");
+
+	if(!nm_lobby){
+		if(nm_host)
+			return nm_pick("Create","\xD1\xEE\xE7\xE4\xE0\xF2\xFC \xE8\xE3\xF0\xF3");
+
+		// A lobby client first asks the server for the match list; a direct
+		// client connects straight away.
+		return nm_conn ? nm_pick("Find","\xCF\xEE\xE8\xF1\xEA")
 			       : nm_pick("Connect","\xCF\xEE\xE4\xEA\xEB\xFE\xF7\xE8\xF2\xFC\xF1\xFF");
+	}
 
 	return nm_host ? nm_pick("Start","\xCD\xE0\xF7\xE0\xF2\xFC")
 		       : nm_pick("Cancel","\xCE\xF2\xEC\xE5\xED\xE0");
@@ -216,6 +231,14 @@ static const char* nm_host_str(void)
 {
 	if(nm_is_ru()) return nm_host ? "\xD5\xEE\xF1\xF2" : "\xEA\xEB\xE8\xE5\xED\xF2";	// Хост / клиент
 	return nm_host ? "Host" : "Client";
+}
+
+static const char* nm_conn_str(void)
+{
+	if(nm_is_ru())
+		return nm_conn ? "\xCB\xEE\xE1\xE1\xE8"		// Лобби
+			       : "\xCF\xF0\xFF\xEC\xEE\xE5";		// Прямое
+	return nm_conn ? "Lobby" : "Direct";
 }
 
 // Name of a mechos figure. The engine keeps one per figure id, 0 based.
@@ -238,6 +261,7 @@ static void nm_format_value(int id,char* out,int sz)
 {
 	switch(id){
 		case NM_HOST:  sprintf(out,"%s",nm_host_str()); break;
+		case NM_CONN:  sprintf(out,"%s",nm_conn_str()); break;
 		case NM_FIG:   sprintf(out,"%s",nm_figure_str(nm_fig)); break;
 		case NM_SP1:   sprintf(out,"%s",nm_spell_str(nm_sp_idx(NM_SP1))); break;
 		case NM_SP2:   sprintf(out,"%s",nm_spell_str(nm_sp_idx(NM_SP2))); break;
@@ -342,19 +366,28 @@ static void nm_cycle_world(int dir)
 // The candidate chain, in the order the cursor walks it. Only the visible ones
 // are linked, so hiding a row drops it out of keyboard navigation for free.
 static const int nm_chain[] = {
-	NM_GAMENAME, NM_HOST, NM_ADDR, NM_NAME, NM_FIG,NM_SP1,NM_SP2,NM_SP3,
-	NM_WORLD, NM_ACTION, NM_BACK
+	NM_GAMENAME, NM_CONN, NM_HOST, NM_ADDR, NM_NAME, NM_FIG,NM_SP1,NM_SP2,NM_SP3,
+	NM_WORLD, NM_LIST0, NM_LIST1, NM_LIST2, NM_LIST3, NM_LIST4, NM_ACTION, NM_BACK
 };
 
 // Whether the cursor may land on a row right now.
 static int nm_row_visible(int id)
 {
+	// While browsing, the list is the only content.
+	if(nm_browse){
+		if(id >= NM_LIST0 && id <= NM_LIST4) return 1;
+		return id == NM_ACTION || id == NM_BACK;
+	}
+
+	if(id == NM_CONN)     return !nm_lobby;
 	if(id == NM_GAMENAME) return nm_host || nm_lobby;
 	if(id == NM_HOST)     return !nm_lobby;
-	if(id == NM_ADDR)     return !nm_host && !nm_lobby;
+	// The address is the host to join (a direct client) or the server to
+	// reach (either role, in lobby mode).
+	if(id == NM_ADDR)     return !nm_lobby && (nm_conn ? 1 : !nm_host);
 	if(id == NM_NAME || id == NM_FIG ||
 	   id == NM_SP1 || id == NM_SP2 || id == NM_SP3) return !nm_lobby;
-	if(id == NM_WORLD)    return nm_host;
+	if(id == NM_WORLD)    return nm_host && !nm_lobby;
 	if(id == NM_ACTION || id == NM_BACK) return 1;
 	return 0;
 }
@@ -385,6 +418,7 @@ static void nm_apply_visibility(void)
 {
 	static int last_host = -1;
 	static int last_lobby = -1;
+	static int last_browse = -1;
 	int i,k;
 	int vis[32];
 	int nvis = 0;
@@ -393,27 +427,28 @@ static void nm_apply_visibility(void)
 	// stay until the background is cleared again. A phase switch therefore
 	// asks for a forced redraw, which is what makes the list appear instead
 	// of the setup rows it replaced.
-	if(last_host != nm_host || last_lobby != nm_lobby){
+	if(last_host != nm_host || last_lobby != nm_lobby || last_browse != nm_browse){
 		last_host = nm_host;
 		last_lobby = nm_lobby;
+		last_browse = nm_browse;
 		acsScrD -> flags |= ACS_FORCED_REDRAW;
 	}
 
 	// Every row that is not a plain label has a label object too.
-	const int rows[] = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,
+	const int rows[] = { NM_CONN,NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,
 			     NM_WORLD,NM_GAMENAME,NM_PLAYHDR };
 	for(i = 0; i < (int)(sizeof(rows)/sizeof(rows[0])); i ++){
 		int id = rows[i];
 		int on;
 
-		if(id == NM_PLAYHDR) on = nm_lobby;
+		if(id == NM_PLAYHDR) on = nm_lobby || nm_browse;
 		else on = nm_row_visible(id);
 
 		nm_show(id,on);
 	}
 
 	for(i = 0; i < NM_ROWS; i ++)
-		nm_show(NM_LIST0 + i,nm_lobby);
+		nm_show(NM_LIST0 + i,nm_lobby || nm_browse);
 
 	nm_show(NM_TITLE,1);
 	nm_show(NM_STATUS,nm_lobby);
@@ -446,6 +481,7 @@ static void nm_refresh(void)
 	nm_apply_visibility();
 
 	nm_format_value(NM_HOST,buf,sizeof(buf));  nm_set_text(NM_HOST,buf);
+	nm_format_value(NM_CONN,buf,sizeof(buf));  nm_set_text(NM_CONN,buf);
 	nm_format_value(NM_FIG,buf,sizeof(buf));   nm_set_text(NM_FIG,buf);
 	nm_format_value(NM_SP1,buf,sizeof(buf));   nm_set_text(NM_SP1,buf);
 	nm_format_value(NM_SP2,buf,sizeof(buf));   nm_set_text(NM_SP2,buf);
@@ -477,20 +513,41 @@ static void nm_refresh(void)
 	for(i = 0; i < (int)(sizeof(nm_chain)/sizeof(nm_chain[0])); i ++)
 		nm_set_text(NM_LBL(nm_chain[i]),nm_label_str(nm_chain[i]));
 
-	// Roster lines and status.
+	// The list serves two phases: the server's match list while browsing, and
+	// the live roster once the session is up.
 	for(i = 0; i < NM_ROWS; i ++){
-		const char* name = nm_lobby ? mchNetPlayerName(i) : "";
-		int fig = nm_lobby ? mchNetPlayerFigure(i) : 0;
+		if(nm_browse){
+			if(i < mchNetLobbyMatchCount())
+				sprintf(buf,"%s  %d/%d  %s",
+					mchNetLobbyMatchName(i),
+					mchNetLobbyMatchPlayers(i),
+					mchNetLobbyMatchMax(i),
+					nm_world_str(mchNetLobbyMatchWorld(i)));
+			else
+				sprintf(buf,"-");
+		}
+		else if(nm_lobby){
+			const char* name = mchNetPlayerName(i);
+			int fig = mchNetPlayerFigure(i);
 
-		if(name && name[0])
-			sprintf(buf,"%s - %s",name,fig ? nm_figure_str(fig) : "-");
+			if(name && name[0])
+				sprintf(buf,"%s - %s",name,fig ? nm_figure_str(fig) : "-");
+			else
+				sprintf(buf,"-");
+		}
 		else
 			sprintf(buf,"-");
 
 		nm_set_text(NM_LIST0 + i,buf);
 	}
 
-	if(nm_lobby){
+	if(nm_browse){
+		sprintf(buf,"%s: %s",
+			nm_pick("Lobby","\xCB\xEE\xE1\xE1\xE8"),
+			mchNetLobbyBrowseStatus());
+		nm_set_text(NM_STATUS,buf);
+	}
+	else if(nm_lobby){
 		// The local row is the one this machine owns; mark it so a player can
 		// find themselves in the list at a glance.
 		sprintf(buf,"%s %d",nm_pick("Players:","\xC8\xE3\xF0\xEE\xEA\xE8:"),
@@ -513,6 +570,15 @@ static void nm_leave_to_race(void)
 
 static void nm_back_to_menu(void)
 {
+	// From the match list, back returns to the setup and drops the server
+	// connection: the browser was only looking, not seated.
+	if(nm_browse){
+		mchNetLobbyClose();
+		nm_browse = 0;
+		nm_refresh();
+		return;
+	}
+
 	// In the lobby, back means back to the setup: the host can change
 	// something and create the game again, the client can edit and reconnect.
 	// A second back, from the setup, leaves for the main menu.
@@ -537,10 +603,17 @@ static void nm_capture_local(void)
 {
 	aciScreenInputField* f;
 
-	if((f = (aciScreenInputField*)nm_obj(NM_ADDR))) strncpy(nm_addr,f -> string,sizeof(nm_addr) - 1);
+	// The address field is one object for two meanings: the host to join in
+	// direct mode, the server to reach in lobby mode. Read it back into the
+	// variable that matches the current meaning.
+	if((f = (aciScreenInputField*)nm_obj(NM_ADDR))){
+		if(nm_conn) strncpy(nm_lobby_addr,f -> string,sizeof(nm_lobby_addr) - 1);
+		else        strncpy(nm_addr,f -> string,sizeof(nm_addr) - 1);
+	}
 	if((f = (aciScreenInputField*)nm_obj(NM_NAME))) strncpy(nm_name,f -> string,sizeof(nm_name) - 1);
 	if((f = (aciScreenInputField*)nm_obj(NM_GAMENAME))) strncpy(nm_game,f -> string,sizeof(nm_game) - 1);
 	nm_addr[sizeof(nm_addr) - 1] = 0;
+	nm_lobby_addr[sizeof(nm_lobby_addr) - 1] = 0;
 	nm_name[sizeof(nm_name) - 1] = 0;
 	nm_game[sizeof(nm_game) - 1] = 0;
 
@@ -564,8 +637,40 @@ static void nm_action(void)
 {
 	nm_capture_local();
 
+	// Browsing: the button refreshes the server's match list. Joining is done
+	// on the match lines themselves.
+	if(nm_browse){
+		mchNetLobbyBrowseRefresh();
+		return;
+	}
+
 	if(!nm_lobby){
 		int ok;
+
+		if(nm_conn){
+			// Through the lobby server. The host registers and waits; the
+			// client lists matches and picks one on the next phase.
+			if(nm_host){
+				mchNetMenuWorld = nm_world;
+				mchNetMenuTrack = 0;
+				ok = mchNetLobbyServerHost(nm_lobby_addr,
+					nm_name[0] ? nm_name : "host",nm_game,
+					nm_fig,nm_sp);
+
+				if(ok){ nm_lobby = 1; nm_refresh(); }
+			}
+			else {
+				ok = mchNetLobbyServerJoin(nm_lobby_addr,
+					nm_name[0] ? nm_name : "player",nm_fig,nm_sp);
+
+				if(ok){
+					nm_browse = 1;
+					mchNetLobbyBrowseRefresh();
+					nm_refresh();
+				}
+			}
+			return;
+		}
 
 		if(nm_host){
 			mchNetMenuWorld = nm_world;
@@ -732,14 +837,15 @@ void acsInitNetMenu(void)
 	nm_add_field(scr,proto,NM_LBL(NM_GAMENAME),lx,70,w,32);
 	nm_add_field(scr,proto,NM_GAMENAME,vx,70,w,NET_GAME_NAME_LEN);
 
-	// Setup rows.
-	y = 110;
+	// Setup rows. One more than before (the link choice), so the pitch is a
+	// touch tighter to keep clear of the status line.
+	y = 100;
 	{
-		const int rows[] = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
+		const int rows[] = { NM_CONN,NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
 		for(i = 0; i < (int)(sizeof(rows)/sizeof(rows[0])); i ++){
 			nm_add_field(scr,proto,NM_LBL(rows[i]),lx,y,w,32);
 			nm_add_field(scr,proto,rows[i],vx,y,w,110);
-			y += 28;
+			y += 26;
 		}
 	}
 
@@ -766,6 +872,10 @@ void acsInitNetMenu(void)
 		// the lobby and start the race.
 		if(id == NM_ACTION || id == NM_BACK) continue;
 
+		// Match lines join on a left click alone; the generic selector pair
+		// would make a right click join too.
+		if(id >= NM_LIST0 && id <= NM_LIST4) continue;
+
 		if(id == NM_ADDR || id == NM_NAME || id == NM_GAMENAME){
 			nm_add_event(o,VK_MOUSE_LBUTTON,id,0);
 		}
@@ -773,6 +883,11 @@ void acsInitNetMenu(void)
 			nm_add_event(o,VK_MOUSE_LBUTTON,id,1);
 			nm_add_event(o,VK_MOUSE_RBUTTON,id,-1);
 		}
+	}
+
+	for(i = 0; i < NM_ROWS; i ++){
+		aciScreenObject* o = nm_obj(NM_LIST0 + i);
+		if(o) nm_add_event(o,VK_MOUSE_LBUTTON,NM_LIST0 + i,0);
 	}
 
 	if((p = nm_obj(NM_ACTION))) nm_add_event(p,VK_MOUSE_LBUTTON,NM_ACTION,0);
@@ -817,7 +932,7 @@ void acsInitNetMenu(void)
 */
 int acsNetMenuKey(int key)
 {
-	static const int rows[] = { NM_HOST,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
+	static const int rows[] = { NM_CONN,NM_HOST,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
 	int mx,my;
 	int i;
 
@@ -841,8 +956,15 @@ int acsNetMenuExtEvent(int row,int dir)
 {
 	switch(row){
 		case NM_HOST:
-			if(nm_lobby) return 1;
+			if(nm_lobby || nm_browse) return 1;
 			nm_host = !nm_host;
+			break;
+		case NM_CONN:
+			if(nm_lobby || nm_browse) return 1;
+			nm_conn = !nm_conn;
+			// The address object serves both meanings; show the stored value
+			// for the one now selected.
+			nm_set_text(NM_ADDR,nm_conn ? nm_lobby_addr : nm_addr);
 			break;
 		case NM_ADDR:
 			if(nm_host || nm_lobby) return 1;
@@ -876,6 +998,10 @@ int acsNetMenuExtEvent(int row,int dir)
 			if(!nm_host) return 1;
 			nm_cycle_world(dir ? 1 : -1);
 			break;
+		case NM_LIST0: case NM_LIST1: case NM_LIST2:
+		case NM_LIST3: case NM_LIST4:
+			if(nm_browse) mchNetLobbyBrowseJoin(row - NM_LIST0);
+			return 1;
 		case NM_ACTION:
 			nm_action();
 			return 1;
@@ -899,7 +1025,28 @@ int acsNetMenuExtEvent(int row,int dir)
 */
 void acsNetMenuQuant(void)
 {
-	if(!nm_built || !nm_lobby) return;
+	if(!nm_built) return;
+
+	// The server channel runs in every phase of this screen, because the host
+	// advertises and the client lists from the setup and browse phases, not
+	// only from the in-session lobby.
+	mchNetMenuPump();
+
+	if(nm_browse){
+		// The server introduced a host: the client leaves the list and joins
+		// the session, which is now connecting.
+		if(mchNetLobbyClientJoined()){
+			nm_browse = 0;
+			nm_lobby = 1;
+			nm_refresh();
+			return;
+		}
+
+		nm_refresh();
+		return;
+	}
+
+	if(!nm_lobby) return;
 
 	mchNetLobbyQuant();
 

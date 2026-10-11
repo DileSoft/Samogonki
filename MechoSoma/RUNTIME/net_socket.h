@@ -41,7 +41,44 @@ void netSocketClose(netSocket s);
 // Resolves a host name (or dotted quad) to a network byte order address.
 int netSocketResolve(const char* host,unsigned int* ip);
 
+// Network byte order address as a dotted quad, NUL terminated.
+void netSocketIpToString(unsigned int ip,char* out,int sz);
+
 int netSocketLocalAddr(netSocket s,unsigned int* ip,unsigned short* port);
+
+/*
+	TCP, used only by the lobby server and its client.
+
+	The lobby talks over TCP because its traffic is a request/response list -
+	match list, register, join - where a lost line is a stuck menu, not a
+	stale frame. Hole punching needs the game's *UDP* public endpoint, which
+	TCP cannot see, so each game also sends one UDP probe from its game
+	socket to the lobby's UDP port and the server pairs that endpoint with the
+	TCP connection by token. See net_lobby_protocol.h.
+*/
+
+// Listening socket, non-blocking. Port 0 lets the OS pick one.
+netSocket netSocketTcpListen(unsigned short port);
+
+// A pending connection on a listener, NET_SOCKET_INVALID when there is none.
+// A listener must be polled; it never blocks.
+netSocket netSocketTcpAccept(netSocket listener,unsigned int* ip,unsigned short* port);
+
+// Starts a non-blocking connect. The socket comes back at once and is only
+// usable once netSocketTcpStatus() reports 1.
+netSocket netSocketTcpConnect(unsigned int ip,unsigned short port);
+
+// 0 still connecting, 1 connected, -1 failed or closed.
+int netSocketTcpStatus(netSocket s);
+
+int netSocketTcpSend(netSocket s,const void* data,int len);
+
+// Returns the bytes read, NET_SOCKET_WOULDBLOCK when nothing is pending, or
+// NET_SOCKET_ERROR. A return of 0 means the peer closed the connection.
+int netSocketTcpRecv(netSocket s,void* data,int len);
+
+// Peer address of a connected socket. ip is network byte order.
+int netSocketTcpPeerAddr(netSocket s,unsigned int* ip,unsigned short* port);
 
 // Last platform error, never NULL.
 const char* netSocketError(void);

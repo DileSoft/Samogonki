@@ -179,6 +179,32 @@ int  mchNetPlayerConfig(int slot,char* out,int sz);
 int  mchNetLobbyStarted(void);
 
 /*
+	The lobby server (rendezvous) client, layered on the menu lobby above.
+
+	A host registers its match with the server; a client lists the matches and
+	joins one. The server sees each game's public UDP endpoint from a probe on
+	the game socket and hands each side the other's, so both can punch through
+	their NATs and then run the ordinary direct connection.
+
+	The match browser is queried from the same screen, in its browse phase.
+*/
+int  mchNetLobbyServerHost(const char* lobby_addr,const char* host_name,const char* game_name,int figure,const int* spells);
+int  mchNetLobbyServerJoin(const char* lobby_addr,const char* player_name,int figure,const int* spells);
+void mchNetLobbyServerHangup(void);
+void mchNetMenuPump(void);
+int  mchNetLobbyClientJoined(void);
+int  mchNetLobbyBrowseState(void);
+const char* mchNetLobbyBrowseStatus(void);
+int  mchNetLobbyMatchCount(void);
+const char* mchNetLobbyMatchName(int index);
+int  mchNetLobbyMatchId(int index);
+int  mchNetLobbyMatchPlayers(int index);
+int  mchNetLobbyMatchMax(int index);
+int  mchNetLobbyMatchWorld(int index);
+void mchNetLobbyBrowseRefresh(void);
+void mchNetLobbyBrowseJoin(int index);
+
+/*
 	Called from the arcane machinery, never from the game loop.
 
 	mchArcaneData::fxlabStart() is the one place both arcane paths converge on -
