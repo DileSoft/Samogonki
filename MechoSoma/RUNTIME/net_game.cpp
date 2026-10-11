@@ -380,12 +380,13 @@ static void net_interp_apply(int slot,mchMechosRacer* mr)
 	mr -> setGlobalVelocity(vel);
 }
 
-// Client side, once per frame: put every remote racer on the interpolated
-// pose for now. The local racer is driven by local input and is skipped.
+// Client side, once per frame: put every racer, the local one included, on the
+// interpolated pose for now. The host is the only machine that knows where
+// anything is, so even the car under this player's hands is drawn from what
+// the host last said about it.
 static void net_apply_interpolation(void)
 {
 	mchRacer* rp;
-	int local = net_match_S -> local_slot();
 	int slot = 0;
 
 	if(mchNetHost) return;
@@ -395,7 +396,7 @@ static void net_apply_interpolation(void)
 	while(rp){
 		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
 
-		if(mr && slot != local)
+		if(mr)
 			net_interp_apply(slot,mr);
 
 		rp = rp -> next;
@@ -439,7 +440,6 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 {
 	netSnapshotHeader hdr;
 	netRacerState racers[NET_MAX_PLAYERS];
-	int local = net_match_S -> local_slot();
 	int count = net_snapshot_unpack(&hdr,racers,NET_MAX_PLAYERS,(const unsigned char*)data,len);
 
 	// The header's tick is the interpolation timeline. See the buffer below.
@@ -477,11 +477,17 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		// its own explosion on every other machine.
 		mr -> net_apply_state(racers[i].mech_state);
 
-		if(racers[i].slot == local) continue;
+		/*
+			The pose goes to every racer, the local one included.
 
-		// Buffered, not applied: the draw interpolates between the last two
-		// snapshots a fixed delay behind the newest. See
-		// net_apply_interpolation.
+			It used to be skipped: the client simulated its own car so a
+			keypress did not wait a round trip. But the host simulates that car
+			too, and the two do not step identically - they drift until each
+			player is watching their own car in a different place, and every
+			spell cast near one of them lands next to the other. The host is
+			the only machine that knows where anything is, so its pose is the
+			one drawn, local car and all.
+		*/
 		net_interp_remember(racers[i].slot,hdr.server_tick,
 				    Vect3f(net_uq_world(racers[i].pos_x),
 					   net_uq_world(racers[i].pos_y),
@@ -1237,23 +1243,28 @@ void mchNetQuant(void)
 		net_log("client: assigned slot %d",net_match_S -> local_slot());
 
 		// The client drives its own slot and nothing else, so the AI has to
-		// let go of just that one.
+		// let go of just that one. setActiveRacer also points the camera and
+		// the control config at it.
 		if(rp){
 			mch_raceD -> AI_Toggle(rp,0);
 			mch_raceD -> setActiveRacer(rp);
 			}
 
-		// Every other slot is driven by the host's snapshots. Leaving the AI
-		// on them would have two simulators steering the same car and the
-		// pose would be overwritten every frame while the forces kept
-		// accumulating: jitter, and the wrong car on screen.
+		/*
+			Every racer is pose-driven from the host, the local car included:
+			the server is the source of truth, so nothing on this machine is
+			simulated. Each one is marked net-controlled so its own physics
+			does not also steer it - two simulators on one car is jitter and a
+			pose that disagrees with the host.
+
+			The keyboard is still read from the local car, to send; it just
+			does not drive the body here.
+		*/
 		rp = mch_raceD -> racerLst -> first();
 
 		while(rp){
-			if(slot != net_match_S -> local_slot()){
-				mch_raceD -> AI_Toggle(rp,0);
-				rp -> set_net_control(1);
-				}
+			mch_raceD -> AI_Toggle(rp,0);
+			rp -> set_net_control(1);
 
 			rp = rp -> next;
 			slot ++;
