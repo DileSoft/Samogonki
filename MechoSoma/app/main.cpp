@@ -6,6 +6,8 @@
 #include <SDL2/SDL.h>
 #include "filesystem.h"
 
+#include <cstdio>
+
 #ifdef EMSCRIPTEN
 #include <emscripten.h>
 #define SOKOL_GLES3
@@ -39,7 +41,13 @@ namespace {
     int run_net_selftest() {
         const int result = net_selftest();
         if (result) {
+            // OutputDebugString is Windows-only; the other platforms write the
+            // same message to stderr so CI logs still show the failure.
+#ifdef _WIN32
             OutputDebugStringA("moonshine: network transport self test FAILED, see nettest.log\n");
+#else
+            fprintf(stderr, "moonshine: network transport self test FAILED, see nettest.log\n");
+#endif
         }
         return result;
     }

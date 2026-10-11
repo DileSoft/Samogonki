@@ -56,3 +56,9 @@ jobs:
       with:
         name: moonshine-runners-macos
         path: build/MechoSoma/moonshine-runners.app
+
+    - name: Upload lobby server artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: moonshine-lobby-macos
+        path: build/LobbyServer/moonshine-lobby

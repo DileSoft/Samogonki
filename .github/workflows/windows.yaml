@@ -67,3 +67,11 @@ jobs:
         path: |
           build-mingw/MechoSoma/moonshine-runners.exe
           build-mingw/MechoSoma/*.dll
+
+    - name: publish lobby server artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: moonshine-lobby-windows
+        path: |
+          build-mingw/LobbyServer/moonshine-lobby.exe
+          build-mingw/LobbyServer/*.dll

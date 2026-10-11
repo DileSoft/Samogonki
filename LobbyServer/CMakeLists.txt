@@ -16,6 +16,12 @@ if (WIN32)
     target_link_libraries(moonshine-lobby PRIVATE ws2_32)
 endif()
 
+# The console loop sleeps through std::this_thread. libstdc++ on Linux needs
+# pthread linked for that; the other platforms bring it in with their libc.
+if (UNIX AND NOT APPLE)
+    target_link_libraries(moonshine-lobby PRIVATE pthread)
+endif()
+
 # Same standalone treatment as the game on MinGW: no libstdc++/libgcc DLLs to
 # ship beside it, only the winpthread the standard thread support needs.
 if (MINGW)
