@@ -612,10 +612,11 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 		mr -> net_apply_state(racers[i].mech_state);
 
 		/*
-			The local car keeps its own simulation: a keypress that waited a
-			round trip would feel dead, and that is the whole reason it is
-			simulated here. The host's pose is kept only to check it against,
-			once a second - see net_reconcile_local.
+			The local car is put on the host's pose as soon as a snapshot
+			arrives, and left to simulate itself until the next one. The host
+			is authoritative, so it wins every 25 ms; the local simulation in
+			between is what keeps a keypress instant instead of a round trip.
+			net_reconcile_local only covers the case where snapshots stall.
 		*/
 		if(racers[i].slot == net_match_S -> local_slot()){
 			net_local_auth.set(net_uq_world(racers[i].pos_x),
@@ -626,6 +627,14 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 					       (float)racers[i].vel_z);
 			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
 			net_local_auth_valid = 1;
+
+			// The host's pose, applied now. setPositionExact holds the z the
+			// host sent (a ground snap would drop a flying car every snapshot);
+			// it still clears the velocity and forces the car integrates from,
+			// so the host's velocity goes back on straight after - otherwise
+			// the car would stall for a frame every snapshot.
+			mr -> setPositionExact(net_local_auth,net_local_auth_yaw);
+			mr -> setGlobalVelocity(net_local_auth_vel);
 
 			// The teleport trap freezes its victim in place (and hides it)
 			// while it charges, then drops it on the target. Without this the

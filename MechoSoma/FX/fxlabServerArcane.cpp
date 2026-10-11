@@ -481,7 +481,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),owner->R().z + owner->radius());
 			fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_GROUND_MODEL);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_GROUND_MODEL,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_SHIFT_TRAP_MODEL);
 			t->SetPosition(Position);
@@ -502,13 +502,13 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		case ARCANE058:
 			Position = owner->R();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_MASS_SHIFTER_NITRO);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_MASS_SHIFTER_NITRO,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_PRIMARY_MASS_SHIFTER);
 			t->SetPosition(Position);
 			t->Start();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_CONTROL_OMNI,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_TELEPORT_OMNI_NITRO);
 			t->SetPosition(Position);
