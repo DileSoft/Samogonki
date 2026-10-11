@@ -1555,6 +1555,25 @@ int mchNetPlayerFigure(int slot)
 	return net_match_S -> player(slot).figure;
 }
 
+// The "figure s1 s2 s3" config the race loader wants, from the lobby roster.
+// Returns 0 when that slot has no player or never picked a mechos.
+int mchNetPlayerConfig(int slot,char* out,int sz)
+{
+	const netMatchPlayer* p;
+
+	if(!net_match_S || !out || sz < 16) return 0;
+	if(slot < 0 || slot >= NET_MAX_PLAYERS) return 0;
+
+	p = &net_match_S -> player(slot);
+
+	if(!p -> is_present || p -> figure <= 0) return 0;
+
+	sprintf(out,"%d %d %d %d",p -> figure,
+		p -> spells[0],p -> spells[1],p -> spells[2]);
+
+	return 1;
+}
+
 // The host has pressed start; the client should be leaving the menu to load.
 int mchNetLobbyStarted(void)
 {

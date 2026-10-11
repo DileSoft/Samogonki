@@ -118,9 +118,22 @@ static int  nm_lobby = 0;		// the session is up, the roster is shown
 static char nm_game_pushed[NET_GAME_NAME_LEN] = "";
 
 // The three spell slots are part indices 1..3 of the mechos: index 0 is the
-// figure itself, the rest carry one arcane each. The labels say front/middle/
-// rear, which is how the constructor orders them on screen.
+// figure itself, the rest carry one arcane each.
 static const int nm_spell_slot[3] = { 1, 2, 3 };
+
+/*
+	The mechos parts are pooled as middle, front, rear, and the config string
+	must list them in that order - GetMechos reads token i against pool slot i.
+	The menu shows the slots as front, middle, rear, so each row is redirected
+	to the pool slot it edits. nm_sp[] stays in pool order.
+*/
+static int nm_sp_idx(int row)
+{
+	if(row == NM_SP1) return 1;	// front: pool slot 2
+	if(row == NM_SP2) return 0;	// middle: pool slot 1
+	if(row == NM_SP3) return 2;	// rear: pool slot 3
+	return 0;
+}
 
 #define NM_ROWS 5		// roster lines drawn
 
@@ -226,9 +239,9 @@ static void nm_format_value(int id,char* out,int sz)
 	switch(id){
 		case NM_HOST:  sprintf(out,"%s",nm_host_str()); break;
 		case NM_FIG:   sprintf(out,"%s",nm_figure_str(nm_fig)); break;
-		case NM_SP1:   sprintf(out,"%s",nm_spell_str(0)); break;
-		case NM_SP2:   sprintf(out,"%s",nm_spell_str(1)); break;
-		case NM_SP3:   sprintf(out,"%s",nm_spell_str(2)); break;
+		case NM_SP1:   sprintf(out,"%s",nm_spell_str(nm_sp_idx(NM_SP1))); break;
+		case NM_SP2:   sprintf(out,"%s",nm_spell_str(nm_sp_idx(NM_SP2))); break;
+		case NM_SP3:   sprintf(out,"%s",nm_spell_str(nm_sp_idx(NM_SP3))); break;
 		case NM_WORLD: sprintf(out,"%s",nm_world_str(nm_world)); break;
 		default:       out[0] = 0; break;
 	}
@@ -849,15 +862,15 @@ int acsNetMenuExtEvent(int row,int dir)
 			break;
 		case NM_SP1:
 			if(nm_lobby) return 1;
-			nm_cycle_spell(0,dir ? 1 : -1);
+			nm_cycle_spell(nm_sp_idx(NM_SP1),dir ? 1 : -1);
 			break;
 		case NM_SP2:
 			if(nm_lobby) return 1;
-			nm_cycle_spell(1,dir ? 1 : -1);
+			nm_cycle_spell(nm_sp_idx(NM_SP2),dir ? 1 : -1);
 			break;
 		case NM_SP3:
 			if(nm_lobby) return 1;
-			nm_cycle_spell(2,dir ? 1 : -1);
+			nm_cycle_spell(nm_sp_idx(NM_SP3),dir ? 1 : -1);
 			break;
 		case NM_WORLD:
 			if(!nm_host) return 1;

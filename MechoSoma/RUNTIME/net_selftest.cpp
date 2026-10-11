@@ -1360,6 +1360,9 @@ static int net_test_menu_lobby(FILE* f)
 				}
 
 			if(phase == PHASE_GO && now - phase_ms > 200){
+				// A world different from the one open_host took, so the
+				// client's world on the prepare is provably the host's pick.
+				hmatch -> set_world(7,0,5);
 				hmatch -> force_start();
 				phase = PHASE_WAIT_ACK;
 				phase_ms = now;
@@ -1377,6 +1380,15 @@ static int net_test_menu_lobby(FILE* f)
 					if(cm[i] -> state() != NET_MATCH_STARTING){
 						net_logf(f,"FAIL menulobby: client %d state %d, expected STARTING",
 							i,cm[i] -> state());
+						ok = 0;
+						}
+
+				// The world the host changed to must have arrived on the
+				// prepare, since that is what the client loads on.
+				for(i = 0; i < NUM; i ++)
+					if(cm[i] -> world_id() != 7){
+						net_logf(f,"FAIL menulobby: client %d world %d, host picked 7",
+							i,cm[i] -> world_id());
 						ok = 0;
 						}
 

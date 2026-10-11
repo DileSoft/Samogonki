@@ -526,6 +526,14 @@ int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 			if(sg -> flags & NET_START_PREPARE){
 				_state = NET_MATCH_STARTING;
 
+				// The prepare carries the final world. The client leaves the
+				// menu on it and loads that world, so it has to be read here,
+				// not only from the commit that follows - by then the client
+				// is already inside the loader.
+				_world_id = sg -> world_id;
+				_track_id = sg -> track_id;
+				_laps = sg -> laps;
+
 				// In the menu lobby the race is loaded after this message, so
 				// the acknowledgement has to wait for that: the host would
 				// otherwise begin while this machine is still loading a world.

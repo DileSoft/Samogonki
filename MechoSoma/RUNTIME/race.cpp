@@ -909,6 +909,28 @@ void mchInitRaceDispatcher(void)
 
 			rs = rs -> next;
 		}
+
+		/*
+			A net race: every car's mechos is the one its player picked in the
+			lobby, not the random one the pool handed out. The roster carries
+			it per slot and the race numbers its cars in slot order, so the
+			list position is the slot. This covers the remote cars and agrees
+			with the local one set just above.
+		*/
+		if(mchNetGame){
+			int slot = 0;
+
+			rs = mch_racerLst.first();
+			while(rs){
+				char net_cfg[32];
+
+				if(mchNetPlayerConfig(slot,net_cfg,sizeof(net_cfg)))
+					rs -> SetMechos(net_cfg);
+
+				rs = rs -> next;
+				slot ++;
+			}
+		}
 	}
 
 	st = mch_raceD -> startLst -> first();
