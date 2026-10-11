@@ -205,6 +205,13 @@ void mchNetArcaneLatch(int ownerID,int arcane_id,int victimID);
 void mchNetGameOver(void);
 
 /*
+	Host side: a racer crossed the line. The clients draw a remote car only
+	from snapshots, so they never see the moment it finishes; this event drives
+	the finish fanfare on their copy. No-op off the host.
+*/
+void mchNetRacerFinished(int ownerID);
+
+/*
 	Write one line to the running net log from a layer that has no logger of
 	its own (net_fx.cpp). No-op when no race is running.
 */

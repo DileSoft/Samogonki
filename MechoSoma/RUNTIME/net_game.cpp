@@ -28,6 +28,10 @@ extern void mchResumeSound(void);
 // client reaches it from here when the host says the race is over.
 void mchEndGame(void);
 
+// race.cpp: the finish fanfare (sound + effect) a machine plays for a racer it
+// did not simulate. Lives there because the audio headers already do.
+void mchNetFinishVisual(mchRacer* p);
+
 /*
 	Net races write a running log to net.log, next to the binary.
 
@@ -994,6 +998,39 @@ void mchNetGameOver(void)
 }
 
 /*
+	Host side: a racer just finished. Queue the fanfare so the clients can
+	play it on their snapshot-driven copy of that car. Reliable, like the
+	other events: the ending of a race is not something to drop.
+*/
+void mchNetRacerFinished(int ownerID)
+{
+	netEvent* e;
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != ownerID){
+		rp = rp -> next;
+		slot ++;
+		}
+
+	if(!rp) return;
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = NET_EV_RACER_FINISHED;
+	e -> slot = (unsigned char)slot;
+}
+
+/*
 	Client side: the host says the race is over. mchEndGame is the same call
 	the host makes - it only differs in skipping the single-player rewards
 	when mchNetGame - and it is idempotent, so a client that already ended its
@@ -1026,7 +1063,7 @@ static void net_apply_visual_event(const netEvent* e)
 
 	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT &&
 	   e -> type != NET_EV_ARCANE_STOP_VISUAL && e -> type != NET_EV_ARCANE_LATCH &&
-	   e -> type != NET_EV_HORN) return;
+	   e -> type != NET_EV_HORN && e -> type != NET_EV_RACER_FINISHED) return;
 	if(e -> slot >= NET_MAX_PLAYERS) return;
 
 	net_log("client: visual arcane %d type %d slot %d",(int)e -> arcane_id,(int)e -> type,(int)e -> slot);
@@ -1045,6 +1082,17 @@ static void net_apply_visual_event(const netEvent* e)
 		// machine hears it from here, at that car's position.
 		if(e -> slot != net_match_S -> local_slot())
 			static_cast<mchMechosRacer*>(rp) -> beep();
+		return;
+		}
+
+	if(e -> type == NET_EV_RACER_FINISHED){
+		// This machine poses the car and never runs its finish block, so the
+		// fanfare comes from the event. The finisher's own machine already
+		// played it locally.
+		if(e -> slot != net_match_S -> local_slot()){
+			mchNetFinishVisual(rp);
+			net_log("client: racer %d finished",(int)e -> slot);
+			}
 		return;
 		}
 

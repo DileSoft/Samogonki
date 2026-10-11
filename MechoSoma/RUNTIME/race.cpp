@@ -1883,6 +1883,25 @@ int mchRaceDispatcher::checkEndGame(void)
 	return 1;
 }
 
+/*
+	Client side: a remote racer crossed the line. This machine only poses that
+	car from snapshots and never runs the finish block above, so the fanfare is
+	driven from the race state; see mchNetRacerFinished.
+
+	The same two things the block does for a finisher that is not the active
+	racer: the sound and the exult effect. A remote car is never this machine's
+	active racer, so the guard is only here to stay honest about it.
+*/
+void mchNetFinishVisual(mchRacer* p)
+{
+	if(!p) return;
+
+	mchStartSoundEFF(EFF_FINISH,p -> R().x,p -> R().y);
+
+	if(!(p -> flags & MCH_ACTIVE_RACER))
+		p -> StartEffect(Mechos::Effect::ExultEffect);
+}
+
 void mchRacerStats::save(XStream* fh)
 {
 	int i;
@@ -3024,6 +3043,11 @@ void mchRaceDispatcher::CP_Quant(mchRacer* p)
 
 						fxlabRacerEvent(FX_RACER_EVENT_FINISH,p);
 						mchStartSoundEFF(EFF_FINISH,p -> R().x,p -> R().y);
+
+						// A client only poses a remote car, so it never
+						// reaches this block for one and would miss the
+						// fanfare. Tell it; it skips its own car.
+						mchNetRacerFinished(p -> ID);
 
 						if(!(p -> flags & MCH_ACTIVE_RACER))
 							p -> StartEffect(Mechos::Effect::ExultEffect);
