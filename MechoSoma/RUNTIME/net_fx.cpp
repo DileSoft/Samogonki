@@ -549,7 +549,7 @@ static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 	// Recovered from the mesh the body already loaded, which is the value the
 	// body was constructed with. This is the one number that cannot be
 	// derived locally, and the reason the field exists.
-	s -> model_id = (unsigned short)(b -> geometry -> Type);
+	s -> model_id = (unsigned int)(b -> geometry -> Type);
 
 	// Reserved. The host owns lifetimes and every class has its own idea of
 	// what one is, so a number here would be a promise the client could not

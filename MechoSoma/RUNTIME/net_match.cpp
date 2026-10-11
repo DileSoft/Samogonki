@@ -47,6 +47,8 @@ netMatch::netMatch(netSession* sess) : _sess(sess)
 	_start_time_ms = 0;
 	_start_request_ms = 0;
 
+	_lobby_full_ms = 0;
+
 	_last_roster_ms = 0;
 	_roster_dirty = 0;
 
@@ -724,6 +726,21 @@ void netMatch::quant(void)
 			_roster_dirty = 0;
 			_last_roster_ms = now;
 			send_roster(0);
+			}
+
+		// The lobby has nobody to press "start" until the menu phase lands, so
+		// the roster alone decides: two racers seated is a race. The clock runs
+		// from when the roster last changed, so joining at the last second
+		// restarts the countdown instead of starting on top of somebody.
+		if(_state == NET_MATCH_LOBBY){
+			if(_count >= 2){
+				if(!_lobby_full_ms) _lobby_full_ms = now;
+				}
+			else
+				_lobby_full_ms = 0;
+
+			if(_lobby_full_ms && (int)(now - _lobby_full_ms) >= NET_LOBBY_START_MS)
+				force_start();
 			}
 
 		if(_state == NET_MATCH_STARTING){

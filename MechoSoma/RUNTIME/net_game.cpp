@@ -86,8 +86,39 @@ extern int mchNumRacersDef;
 
 int mchNetGame = 0;
 int mchNetHost = 0;
+/*
+	-netrace: start the race without the menus.
+
+	A net race normally begins on the multiplayer screen, which a machine with
+	no human attached cannot reach, and the menu path in between is exactly
+	what nobody has run before. An automated test needs the race and nothing
+	else, so this flag walks the same code the F2 keypress does - ret == 2,
+	MCH_SINGLE_GAME, onto the loading screen - with the menu Quant skipped.
+*/
+int mchNetRaceAuto = 0;
 char mchNetJoinAddr[128] = "127.0.0.1";
 int mchNetPort = NET_DEFAULT_PORT;
+
+/*
+	The world a net race runs, and the only one until a lobby can pick one.
+
+	The menus are what normally choose the world, and a net race has no screen
+	that chooses it: ShowImageRTO::Init leaves mchCurrentWorld at -1, which is
+	not a world anything can index - not the renderer, not the track loader,
+	not fxlab's WorldData. Both sides have to agree on the number, so it is a
+	constant here rather than something either side decides.
+*/
+const int NET_RACE_WORLD = 1;
+const int NET_RACE_TRACK = 0;
+
+extern int mchCurrentWorld;
+extern int mchCurrentTrack;
+
+void mchNetArmRaceWorld(void)
+{
+	mchCurrentWorld = NET_RACE_WORLD;
+	mchCurrentTrack = NET_RACE_TRACK;
+}
 
 const char* mchNetStatusText = "";
 

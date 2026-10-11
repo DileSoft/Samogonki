@@ -136,6 +136,7 @@ extern int mchSplitScreenGame;
 */
 extern int mchNetGame;
 extern int mchNetHost;
+extern int mchNetRaceAuto;
 extern char mchNetJoinAddr[128];
 extern int mchNetPort;
 extern const char* mchNetStatusText;
@@ -143,6 +144,7 @@ extern const char* mchNetStatusText;
 void mchNetStart(void);
 void mchNetFinit(void);
 void mchNetQuant(void);
+void mchNetArmRaceWorld(void);
 
 /*
 	Called from the arcane machinery, never from the game loop.

@@ -804,8 +804,8 @@ static int net_test_spawn(FILE* f)
 
 	// Wire sizes. Packed, or the memcpy would ship padding and two builds of
 	// the same code would disagree on how long a spawn is.
-	if(sizeof(netSpawn) != 27 || sizeof(netSpawnHeader) != 5){
-		net_logf(f,"FAIL sizeof spawn %u/%u, expected 23/5",
+	if(sizeof(netSpawn) != 29 || sizeof(netSpawnHeader) != 5){
+		net_logf(f,"FAIL sizeof spawn %u/%u, expected 29/5",
 			(unsigned)sizeof(netSpawn),(unsigned)sizeof(netSpawnHeader));
 		ok = 0;
 		}
@@ -905,7 +905,7 @@ static int net_test_spawn(FILE* f)
 			sent[i].vel_x = net_q_signed_speed(50.0f * (float)i);
 			sent[i].vel_y = net_q_signed_speed(-20.0f * (float)i);
 			sent[i].vel_z = net_q_signed_speed(5.0f * (float)i);
-			sent[i].model_id = (unsigned short)(0x40000 + i);
+			sent[i].model_id = 0x40000 + (unsigned)i;
 			sent[i].lifetime_ms = 0;
 			sent[i].damage = (unsigned char)i;
 			sent[i].flags = 0;

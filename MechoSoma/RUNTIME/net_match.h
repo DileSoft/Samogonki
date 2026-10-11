@@ -137,6 +137,10 @@ private:
 	unsigned int _start_time_ms;
 	unsigned int _start_request_ms;	// when the host began waiting for acks
 
+	// Host only: when the roster last held two racers or more. The lobby counts
+	// down from there, not from when the host itself sat down.
+	unsigned int _lobby_full_ms;
+
 	unsigned int _last_roster_ms;
 	int _roster_dirty;
 

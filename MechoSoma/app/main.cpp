@@ -128,6 +128,13 @@ int main(int argc, char const *argv[]) {
           strncpy(mchNetJoinAddr, argv[i + 1], sizeof(mchNetJoinAddr) - 1);
           mchNetJoinAddr[sizeof(mchNetJoinAddr) - 1] = '\0';
       }
+      // -netrace is the entry point for a run with nobody at the keyboard,
+      // which is what a test is: the menus need a human, a race does not.
+      // Use it with -nethost on one machine and -netjoin on the other.
+      if (strcmp(argv[i], "-netrace") == 0) {
+          mchNetGame = 1;
+          mchNetRaceAuto = 1;
+      }
   }
   #ifdef STEAM_VERSION
   if (!SteamAPI_Init()) {

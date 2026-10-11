@@ -65,6 +65,10 @@ cmake --build build-ucrt -j 8
 * `RUNTIME/net_socket.cpp` — единственное место с `<winsock2.h>`.
 * `RUNTIME/net_transport.cpp` — сессии, пиры, надёжность, фрагментация.
 * `RUNTIME/net_selftest.cpp` — самотест флагом `-nettest`.
+* `tools/net-race-test.ps1` — автотест живого заезда (хост + клиент);
+  `-Gdb` поднимает обе копии под gdb и печатает стек при падении.
+  Флаги входа: `-nethost` / `-netjoin <адрес>` / `-netrace` (без меню,
+  для автотеста).
 
 **Почему сокеты изолированы.** `windows.h` конфликтует с двумя вещами, которые
 проект объявляет сам: `enum dbtype3ds { Unknown }` в `3dsftk.h` и

@@ -1469,7 +1469,11 @@ int acsQuant(void)
 			address is whatever -netjoin already put in mchNetJoinAddr, or the
 			127.0.0.1 default.
 		*/
-		if(acsScrD -> curScrID == ACS_MULTIPLAYER_SCR && (k == VK_F2 || k == VK_F3)){
+		// curScrID is set once on entry; aciScreenDispatcher::ChangeScreen
+		// moves curScr and never touches it. Reading the live screen is what
+		// makes this fire on the screen actually shown.
+		if(acsScrD -> curScr && acsScrD -> curScr -> ID == ACS_MULTIPLAYER_SCR &&
+		   (k == VK_F2 || k == VK_F3)){
 			mchNetGame = 1;
 			mchNetHost = (k == VK_F2);
 

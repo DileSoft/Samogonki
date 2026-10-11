@@ -1348,6 +1348,14 @@ void CameraDispatcher::setStopTime()
 	setMode(CAM_MODE_STOP_TIME, 1);
 }
 
+void CameraDispatcher::setManualControl(int on)
+{
+	if(on)
+		flags_ |= EnableControl;
+	else
+		flags_ &= ~EnableControl;
+}
+
 void CameraDispatcher::setStartTime()
 {
 	input_mode = StartTimeInput;

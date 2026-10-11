@@ -62,9 +62,12 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // netSpawn::client_link, the visual a client builds next to a replicated body;
 // version 4 added netSpawn::yaw, the heading the factory-built class B bodies
 // are placed with; version 5 added netEvent::pos_z, so an arcane interrupt
-// carries the place its effect sits. A peer of another version is refused in
-// the handshake rather than read with the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 5;
+// carries the place its effect sits; version 6 widened netSpawn::model_id from
+// 16 to 32 bits, because the mesh id is M3D_TOTAL_TYPE and the kind lives in
+// its high half - as 16 bits the kind was lost and the client could not find
+// the mesh to build. A peer of another version is refused in the handshake
+// rather than read with the wrong layout.
+const unsigned int NET_PROTO_VERSION	= 6;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -87,6 +90,12 @@ const int NET_START_DELAY_MS		= 1500;
 // Roster is rebroadcast on change and on this heartbeat, so a peer that
 // misses one still catches the next and late arrivals are not invisible.
 const int NET_ROSTER_MS			= 500;
+
+// Arcade rule, host side: once somebody else is seated, the race starts after
+// this. Not a tuning knob - waiting for a full grid would strand a two-player
+// LAN session in the lobby forever, and nobody else is coming until there is a
+// matchmaker.
+const int NET_LOBBY_START_MS		= 2000;
 
 // Slots: 0 is the host and is never a peer.
 const int NET_SLOT_HOST			= 0;
@@ -439,7 +448,10 @@ struct netSpawn
 	signed short vel_x;
 	signed short vel_y;
 	signed short vel_z;
-	unsigned short model_id;		// already resolved by the host
+	// Full M3D_TOTAL_TYPE, kind and type both: the kind is the high half and a
+	// mesh is looked up by the whole thing. Truncating it to 16 bits loses the
+	// kind and the client's mesh library cannot resolve the model.
+	unsigned int model_id;		// already resolved by the host
 	unsigned short lifetime_ms;
 	unsigned char damage;
 	unsigned char flags;

@@ -664,6 +664,21 @@ int xtInitApplication(void)
 
 	mchInitLogs();
 
+	/*
+		-netrace is the no-human entry point, so it starts where a human would
+		have clicked through to: past the logo images and the intro.
+
+		The two logo screens are one animated INTRO image that waits for a
+		keypress to advance and one splash that waits out its timer; the movie
+		is queued later from the menu. Neither has an audience here, and a test
+		must not sit through screens it cannot dismiss. mch_ShowImages turns the
+		image RTO off, and returning the menu directly skips it entirely.
+	*/
+	if(mchNetRaceAuto){
+		mch_ShowImages = 0;
+		return RTO_MAIN_MENU_ID;
+	}
+
 	return RTO_SHOW_IMAGE_ID;
 }
 
@@ -828,7 +843,29 @@ void GameQuantRTO::Init(int id)
 
 					mchSetTimeMode(MCH_TIME_STOPPED);
 					mchA_ShowStartCountDisable();
-					camera_dispatcher -> setStopTime();
+
+					/*
+						The arcade camera, not stop time.
+
+						A net race is a race, so the camera trails the local
+						racer the way it does in a single race: the body
+						observer, which put the camera behind the car. What it
+						must not be is the stop-time camera - that one is the
+						turn-based view from above, and it is what a campaign
+						race uses between turns.
+
+						Manual control is off: the arcade camera is automatic,
+						and a client's camera stays local and cosmetic, so
+						nobody can scroll their view away from their car.
+					*/
+					camera_dispatcher -> setMode(CAM_MODE_SLOPE_ROTATE);
+					camera_dispatcher -> setObserver(mch_raceD -> activeRacer);
+					camera_dispatcher -> setManualControl(0);
+
+					// Nothing simulates before the host says go. mchFreezeTime
+					// is the pause the rest of the game already honours, and
+					// mchSetTimeMode(MCH_TIME_RUNNING) clears it at the tick.
+					mchFreezeTime = 1;
 					}
 				else if(!iWorldMode && mchEnableTrackDemo){
 					mchInitTrackDemo();
@@ -1165,6 +1202,14 @@ int MainMenuRTO::Quant(void)
 	if(mch_iScreen){
 		if(mchSkipMainMenu)
 			ret = (mchPBEM_Game) ? 4 : 2;
+		else if(mchNetRaceAuto && mchNetGame){
+			// No human, no menu. This is the value the F2 keypress on the
+			// multiplayer screen produces, reached without a screen at all.
+			// The world is armed here because nothing else in this path would
+			// have picked one.
+			mchNetArmRaceWorld();
+			ret = 2;
+			}
 		else
 			ret = acsQuant();
 
@@ -1178,7 +1223,7 @@ int MainMenuRTO::Quant(void)
 				mchGameMode = MCH_ENTIRE_CONTROL_HS;
 
 			if(!mchResourcesFlag){
-				if(iwElectionaryFlag && !mchSplitScreenGame && mchGameMode == MCH_SINGLE_GAME && !acsLoadFlag && iwEnableIntroMovie && !mchPlayerRecorder)
+				if(iwElectionaryFlag && !mchSplitScreenGame && mchGameMode == MCH_SINGLE_GAME && !acsLoadFlag && iwEnableIntroMovie && !mchPlayerRecorder && !mchNetRaceAuto)
 					return RTO_INTRO_MOVIE_ID;
 
 				return RTO_LOADING_ID;

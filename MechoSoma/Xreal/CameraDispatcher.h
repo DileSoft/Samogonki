@@ -238,6 +238,10 @@ public:
 	void setStartTime();
 	void setFreeDirectionFly();
 
+	// Manual camera control (zoom and slope keys/wheel). The arcade race has it
+	// on; a net race turns it off and lets the camera trail the racer.
+	void setManualControl(int on);
+
 	void runStartScenario(); // assume Body observer has been set
 	void runFinishScenario(); // assume Body observer has been set
 	void stopFinishScenario();
