@@ -182,9 +182,9 @@ static int net_motion_have = 0;
 // Client side: the host's authoritative pose for the local car, and when it was
 // last checked against the local one. See net_reconcile_local.
 static Vect3f net_local_auth;
+static Vect3f net_local_auth_vel;
 static float net_local_auth_yaw = 0;
 static int net_local_auth_valid = 0;
-static unsigned int net_reconcile_ms = 0;
 
 // Per slot, whether the horn was held last tick. The host plays one beep per
 // press, so the relay has to fire on the rising edge too.
@@ -483,28 +483,39 @@ static mchRacer* net_racer_at(int slot)
 }
 
 /*
-	Client side: check the locally simulated car against the host, once a
-	second, and correct it only when the two have really come apart.
+	Client side: keep the locally simulated car near the host's copy.
 
 	The local car has to be simulated here or a keypress would wait a round
 	trip, but it is the host's copy that everyone else sees, and the two do not
-	step identically. Left alone they drift until the two players are watching
-	their own car in different places. A per-frame nudge was tried and broke
-	the car's turning - it rewrote the pose the dynamics integrate from - so
-	the correction is a rare, hard snap that only fires past a threshold.
+	step identically - different frame timing and collisions push them apart
+	with neither being wrong. Left alone they drift until the two players are
+	watching their own car in different places.
+
+	The correction is a pull, not a teleport. setPosition() - and with it the
+	old hard snap - runs setPositionInit(), which zeroes the velocity and
+	forces the car integrates from, so every snap left the car standing while
+	the host raced on: it fell behind again at once and got snapped again, the
+	once-a-second jump. translatePose() moves the body and nothing else, so a
+	fraction of the error comes out each pass and the car eases onto the host's
+	line with no jump. Run at racer_quant_period (every 91 ms), a third of the
+	error per pass closes it in a few tenths of a second.
+
+	A teleport (Formicary, MassShifter) or a different collision can throw the
+	car clear across the map, and easing that back would look worse than a cut,
+	so past a wide margin the host still wins outright with a snap.
 */
 static void net_reconcile_local(void)
 {
 	mchMechosRacer* mr;
 	const float half = (float)NET_WORLD_SIZE * 0.5f;
-	unsigned int now = (unsigned int)clocki();
-	Vect3f r;
-	float dx,dy,d2;
+	const float deadzone = 1.5f;	// trust the local sim this close
+	const float snap = 40.0f;	// past this, cut instead of ease
+	const float pull = 0.33f;	// fraction of the error per pass
+	const float max_pull = 5.0f;	// and a ceiling, so a big error does not warp
+	Vect3f r,d;
+	float dx,dy,dist,step;
 
 	if(!net_local_auth_valid) return;
-
-	if((int)(now - net_reconcile_ms) < 1000) return;
-	net_reconcile_ms = now;
 
 	mr = dynamic_cast<mchMechosRacer*>(net_racer_at(net_match_S -> local_slot()));
 	if(!mr) return;
@@ -520,17 +531,27 @@ static void net_reconcile_local(void)
 	if(dy >  half) dy -= (float)NET_WORLD_SIZE;
 	if(dy < -half) dy += (float)NET_WORLD_SIZE;
 
-	d2 = dx*dx + dy*dy;
+	dist = Vect3f(dx,dy,0.0f).norm();
 
-	// Twenty metres is the threshold: under it the local simulation is
-	// trusted, over it the host wins outright. Rare enough that the snap is
-	// a blink, and only when the drift has become visible anyway.
-	if(d2 < 20.0f * 20.0f) return;
+	if(dist < deadzone) return;
 
-	net_log("client: local car %.0f units from the host, snapping",
-		Vect3f(dx,dy,0.0f).norm());
+	if(dist > snap){
+		net_log("client: local car %.0f units from the host, snapping",dist);
 
-	mr -> setPosition(net_local_auth,net_local_auth_yaw);
+		mr -> setPosition(net_local_auth,net_local_auth_yaw);
+
+		// setPosition() cleared the velocity; resume on the host's, or the
+		// car sits still after the cut while the host's copy drives off.
+		mr -> setGlobalVelocity(net_local_auth_vel);
+		return;
+		}
+
+	step = dist * pull;
+	if(step > max_pull) step = max_pull;
+
+	d.set(dx * (step / dist),dy * (step / dist),0.0f);
+
+	mr -> translatePose(d);
 }
 
 /*
@@ -596,6 +617,9 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			net_local_auth.set(net_uq_world(racers[i].pos_x),
 					   net_uq_world(racers[i].pos_y),
 					   net_uq_height(racers[i].pos_z));
+			net_local_auth_vel.set(net_uq_speed(racers[i].vel_x),
+					       net_uq_speed(racers[i].vel_y),
+					       (float)racers[i].vel_z);
 			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
 			net_local_auth_valid = 1;
 			continue;
@@ -1338,7 +1362,6 @@ void mchNetFinit(void)
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
-	net_reconcile_ms = 0;
 	memset(net_horn_last,0,sizeof(net_horn_last));
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;
@@ -1636,7 +1659,6 @@ void mchNetQuant(void)
 		}
 
 	/* --------------------------- drive the race ------------------------- */
-	/* --------------------------- drive the race ------------------------- */
 
 	players = net_match_S -> num_players();
 
@@ -1647,7 +1669,8 @@ void mchNetQuant(void)
 		net_camera_set = 0;
 
 		if(mchNetHost){
-			net_update_ai();
+			// AI is re-evaluated every frame in the host branch below; only
+			// the actor resend needs the roster change itself.
 
 			// A client that has just joined has never seen the world's
 			// actors: their spawns went out before it was there. Send them
@@ -1660,6 +1683,12 @@ void mchNetQuant(void)
 		}
 
 	if(mchNetHost){
+		// Re-evaluated every frame, not only when the roster count changes:
+		// a client that connects just as the race starts can otherwise leave
+		// its car under AI for the first seconds, driving away from the car
+		// the client is already steering. Idempotent - it only toggles on a
+		// real change.
+		net_update_ai();
 		net_apply_host_inputs();
 
 		// Snapshots only exist on the host: it is the only machine that knows

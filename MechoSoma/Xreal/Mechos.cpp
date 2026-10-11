@@ -1409,6 +1409,15 @@ void Mechos::keyboard_control()
 	float do_traction, do_rudder;
 	int horn;
 
+	// -netdrive: test scaffolding. The local car has to be driven from the
+	// same setpoint the host receives, or the test compares a host copy that
+	// is moving against a local car that is parked. Real input never takes
+	// this branch.
+	if(mchNetAutoDrive){
+		apply_control(1.0f,0.4f,0);
+		return;
+		}
+
 	read_raw_input(do_traction, do_rudder, horn);
 
 	// Deliberately unquantized: local play must not lose precision to a wire
