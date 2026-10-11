@@ -265,13 +265,6 @@ public:
 	// host put it.
 	void setPositionExact(const Vect3f& pose, float psi = 0);
 
-	// Translate the body in the world without touching its velocity, forces
-	// or heading. The net reconcile eases the locally simulated car onto the
-	// host's pose with this: setPosition clears the velocity the car
-	// integrates from, so a correction with it stalls the car and it falls
-	// behind again before the next check.
-	void translatePose(const Vect3f& d);
-
 	// Global velocity
 	float averageSpeed() const { return speed_avr; } // усредненная норма скорости
 

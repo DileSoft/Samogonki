@@ -185,7 +185,6 @@ static Vect3f net_local_auth;
 static Vect3f net_local_auth_vel;
 static float net_local_auth_yaw = 0;
 static int net_local_auth_valid = 0;
-static unsigned int net_reconcile_last = 0;
 
 // Per slot, whether the horn was held last tick. The host plays one beep per
 // press, so the relay has to fire on the rising edge too.
@@ -257,6 +256,14 @@ static void net_send_snapshot(void)
 			// client cannot derive any of them for a car it only places by
 			// pose, and the result screen reads all three.
 			s -> flags = (unsigned short)rp -> flags;
+
+			// The engine feature bits, 22 of them in three bytes. Only
+			// STATIC_NULIFICATOR is read back today - it is what the teleport
+			// trap sets on its victim to freeze and hide it during the charge -
+			// but the field is here for the rest as they are needed.
+			s -> features[0] = (unsigned char)(mr -> features() & 0xFF);
+			s -> features[1] = (unsigned char)((mr -> features() >> 8) & 0xFF);
+			s -> features[2] = (unsigned char)((mr -> features() >> 16) & 0xFF);
 
 		// Race standing. The result table and the HUD read these off every
 		// racer's own stats, and a client's remote cars are pose-driven - they
@@ -484,44 +491,42 @@ static mchRacer* net_racer_at(int slot)
 }
 
 /*
-	Client side: keep the locally simulated car near the host's copy.
+	Client side: correct the locally simulated car when it has really come off
+	the host's copy.
 
 	The local car has to be simulated here or a keypress would wait a round
-	trip, but it is the host's copy that everyone else sees, and the two do not
-	step identically - different frame timing and collisions push them apart
-	with neither being wrong. Left alone they drift until the two players are
-	watching their own car in different places.
+	trip, but it is the host's copy that everyone else sees. The two do not step
+	identically, yet left to themselves they stay within a few units (measured
+	with matched input): the difference is frame timing and the odd collision,
+	not a systematic drift. So the local sim is left completely alone in normal
+	driving, which is what keeps the steering responsive.
 
-	The correction is a pull, not a teleport. setPosition() - and with it the
-	old hard snap - runs setPositionInit(), which zeroes the velocity and
-	forces the car integrates from, so every snap left the car standing while
-	the host raced on: it fell behind again at once and got snapped again, the
-	once-a-second jump. translatePose() moves the body and nothing else, so a
-	fraction of the error comes out each pass and the car eases onto the host's
-	line with no jump.
+	What it must not do is leave the car stranded away from the host, so past a
+	wide threshold the host wins outright with a snap. The snap used to be the
+	problem: setPosition() runs setPositionInit(), which zeroes the velocity and
+	forces the car integrates from, so each snap left the car standing while the
+	host drove on, it fell behind again at once, and the two were snapped over
+	and over - the once-a-second jump. Resuming on the host's velocity after the
+	snap is what makes it settle instead of repeating.
 
-	Under a deadzone the local sim is left completely alone. Two simulations
-	fed the same input stay within a few units (measured), so correcting that
-	little every pass only drags on the car, and the driver feels it as
-	sluggish steering. Past the deadzone the pull is deliberately gentle (at
-	racer_quant_period, about a tenth per pass), so even a collision-sized
-	error closes over about a second rather than fighting the driver.
+	An earlier version eased the car across with a small per-frame translation.
+	That was worse than useless: shifting the pose without shifting the velocity
+	rocked the car and drove the two copies *further* apart (measured 0-9 units
+	untouched versus 0-80 with the easing), and the pull it took to hide that is
+	exactly what felt like sluggish steering.
 
-	A teleport (Formicary, MassShifter) or a very different collision can throw
-	the car clear across the map, and easing that back would look worse than a
-	cut, so past a wide margin the host still wins outright with a snap.
+	Teleports (the trap that freezes its victim, Formicary, MassShifter) are not
+	handled here: the trap freezes the local car through the synced feature and
+	the arrival event drops it on the target, so the error never grows into a
+	snap in the first place.
 */
 static void net_reconcile_local(void)
 {
 	mchMechosRacer* mr;
 	const float half = (float)NET_WORLD_SIZE * 0.5f;
-	const float deadzone = 8.0f;	// trust the local sim this close
-	const float snap = 40.0f;	// past this, cut instead of ease
-	const float tau = 1.5f;		// seconds to close an error, roughly
-	const float max_pull = 3.0f;	// ceiling per pass, so a big error does not warp
-	Vect3f r,d;
-	float dx,dy,dist,step,dt,f;
-	unsigned int now;
+	const float threshold = 40.0f;
+	Vect3f r;
+	float dx,dy,d2;
 
 	if(!net_local_auth_valid) return;
 
@@ -539,43 +544,18 @@ static void net_reconcile_local(void)
 	if(dy >  half) dy -= (float)NET_WORLD_SIZE;
 	if(dy < -half) dy += (float)NET_WORLD_SIZE;
 
-	dist = Vect3f(dx,dy,0.0f).norm();
+	d2 = dx*dx + dy*dy;
 
-	if(dist < deadzone) return;
+	if(d2 < threshold * threshold) return;
 
-	if(dist > snap){
-		net_log("client: local car %.0f units from the host, snapping",dist);
+	net_log("client: local car %.0f units from the host, snapping",
+		Vect3f(dx,dy,0.0f).norm());
 
-		mr -> setPosition(net_local_auth,net_local_auth_yaw);
+	mr -> setPosition(net_local_auth,net_local_auth_yaw);
 
-		// setPosition() cleared the velocity; resume on the host's, or the
-		// car sits still after the cut while the host's copy drives off.
-		mr -> setGlobalVelocity(net_local_auth_vel);
-
-		net_reconcile_last = (unsigned int)clocki();
-		return;
-		}
-
-	// Fraction of the error to take out this pass, from the real elapsed
-	// time. mchNetQuant runs once a frame, so a fixed fraction would close the
-	// error faster on a fast machine and drag harder - which is exactly the
-	// sluggish steering this replaced. tau seconds is the same on any frame
-	// rate.
-	now = (unsigned int)clocki();
-	dt = (float)(now - net_reconcile_last) / 1000.0f;
-	net_reconcile_last = now;
-
-	if(dt < 0.001f || dt > 0.5f) dt = 0.016f;
-
-	f = dt / tau;
-	if(f > 0.5f) f = 0.5f;
-
-	step = dist * f;
-	if(step > max_pull) step = max_pull;
-
-	d.set(dx * (step / dist),dy * (step / dist),0.0f);
-
-	mr -> translatePose(d);
+	// setPosition() cleared the velocity; resume on the host's, or the car
+	// sits still after the cut while the host's copy drives off.
+	mr -> setGlobalVelocity(net_local_auth_vel);
 }
 
 /*
@@ -646,6 +626,29 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 					       (float)racers[i].vel_z);
 			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
 			net_local_auth_valid = 1;
+
+			// The teleport trap freezes its victim in place (and hides it)
+			// while it charges, then drops it on the target. Without this the
+			// local car would keep driving through the countdown and only be
+			// yanked across by the reconcile at the end. Only this one bit is
+			// applied today; the rest of the field is along for the ride.
+			{
+				int hf = (int)racers[i].features[0]
+				       | ((int)racers[i].features[1] << 8)
+				       | ((int)racers[i].features[2] << 16);
+				int want = (hf & Mechos::STATIC_NULIFICATOR) != 0;
+				int have = (mr -> features() & Mechos::STATIC_NULIFICATOR) != 0;
+
+				if(want && !have){
+					mr -> set_feature(Mechos::STATIC_NULIFICATOR);
+					net_log("client: local car frozen (teleport trap)");
+					}
+				if(!want && have){
+					mr -> reset_feature(Mechos::STATIC_NULIFICATOR);
+					net_log("client: local car released");
+					}
+			}
+
 			continue;
 			}
 
@@ -1200,16 +1203,32 @@ static void net_apply_visual_event(const netEvent* e)
 		}
 
 	if(e -> type == NET_EV_ARCANE_INTERRUPT){
+		Vect3f where(net_uq_spawn_pos(e -> pos_x),
+			     net_uq_spawn_pos(e -> pos_y),
+			     net_uq_spawn_pos(e -> pos_z));
+
 		/*
-			The caster did not build this one. Interrupts run only on the host,
-			so unlike a cast there is nothing local to skip here - the casting
-			client is waiting for exactly this to see its own storm strike.
-			The place rides on the event.
+			MassShifter, and the teleport trap built on it, lands its victim on
+			"where". On the victim's own machine the local car is posed from
+			the host, so drop it on the target here rather than letting the
+			reconcile ease it across the map. Updating the reconcile target too
+			keeps it from fighting the drop.
+
+			The caster did not build this one: interrupts run only on the host,
+			so unlike a cast there is nothing local to skip.
 		*/
-		fxlabClientArcaneInterrupt(e -> arcane_id,rp -> ID,
-					   Vect3f(net_uq_spawn_pos(e -> pos_x),
-						  net_uq_spawn_pos(e -> pos_y),
-						  net_uq_spawn_pos(e -> pos_z)));
+		if(e -> arcane_id == ARCANE058 && e -> slot == net_match_S -> local_slot()){
+			mchMechosRacer* lm = dynamic_cast<mchMechosRacer*>(rp);
+
+			if(lm){
+				lm -> setPosition(where,lm -> psi());
+				net_local_auth = where;
+				net_local_auth_valid = 1;
+				net_log("client: local car teleported to %d %d",where.xi(),where.yi());
+				}
+			}
+
+		fxlabClientArcaneInterrupt(e -> arcane_id,rp -> ID,where);
 		return;
 		}
 
@@ -1386,7 +1405,6 @@ void mchNetFinit(void)
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
-	net_reconcile_last = 0;
 	memset(net_horn_last,0,sizeof(net_horn_last));
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;
@@ -1715,6 +1733,7 @@ void mchNetQuant(void)
 		// real change.
 		net_update_ai();
 		net_apply_host_inputs();
+
 
 		// Snapshots only exist on the host: it is the only machine that knows
 		// where anything is. The actors go the same way, and only from here:

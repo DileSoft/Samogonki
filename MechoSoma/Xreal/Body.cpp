@@ -353,17 +353,6 @@ void Body::setPositionExact(const Vect3f& pose, float psi)
 	Body::setPositionInit();
 }
 
-void Body::translatePose(const Vect3f& d)
-{
-	Xlg.trans() += d;
-	CYCLE(Xlg.trans());
-
-	// R_prev moves with it: control() measures the distance between the two
-	// for its curvature and speed estimates, and shifting only one of them
-	// would read this correction as a burst of speed.
-	R_prev += d;
-}
-
 void Body::setPosition(const Vect3f& pose, const Vect3f& target)
 {
 	Vect3f dr = getDist(target, Vect3f(pose.x, pose.y, target.z));
