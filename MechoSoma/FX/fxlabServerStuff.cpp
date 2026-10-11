@@ -1364,6 +1364,11 @@ void fxlabServerMassShifter::Quant()
 	if(!CountDown()){
 		Owner->setPosition(Target,Direction);
 
+		// The arrival burst belongs at the target, which a client cannot work
+		// out for itself; it rides an interrupt event from here.
+		mchNetArcaneInterrupt(static_cast<mchRacer*>(Owner)->ID,ARCANE058,
+				      Target.x,Target.y,Target.z);
+
 		t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SOUND_SPACE_IMPULSE);
 		t->SetStartTime(fxlabClientD->GetTime());
 		t->SetSoundID(EFF_TELEPORT_ADD);

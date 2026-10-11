@@ -497,13 +497,31 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			fxlabClientArcaneSoundLong(Position,EFF_TELEPORT);
 			break;
 
+		//MassShifter (0-Transportation): the departure burst. The arrival is a
+		//later interrupt, which carries the target the host picked.
+		case ARCANE058:
+			Position = owner->R();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_MASS_SHIFTER_NITRO);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_PRIMARY_MASS_SHIFTER);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_TELEPORT_OMNI_NITRO);
+			t->SetPosition(Position);
+			t->Start();
+
+			fxlabClientArcaneSoundImpulse(Position,EFF_START_TELEPORT);
+			break;
+
 		//DragonWind
 		case ARCANE050:
 			Position = owner->R();
 			fxlabClientArcaneSoundImpulse(Position,EFF_DRAGON_POWER_ADD);
-			break;
-
-		//FrogWind
+			break;		//FrogWind
 		case ARCANE052:
 			Position = owner->R();
 			fxlabClientArcaneSoundImpulse(Position,EFF_FROG);
@@ -641,6 +659,49 @@ void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const Vect3f& Positio
 		//Mines: the mortar is a body and travels as class B.
 		case ARCANE061:
 			fxlabClientArcaneSoundImpulse(Position,EFF_MINES);
+			break;
+
+		//Petard: the burst. The throw came with the cast; this is where it
+		//lands, and the place rides the event because the host works it out
+		//from the throw rather than leaving it on the car.
+		case ARCANE002:
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SPARK_GENERATOR);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_PETARD_BURN);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_PETARD_BURN_OMNI);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_MODEL);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_PETARD_BURN_MODEL);
+			t->SetPosition(Position);
+			t->Start();
+
+			fxlabClientArcaneSoundImpulse(Position,EFF_PETARD_EXPLOSION);
+			break;
+
+		//MassShifter (0-Transportation): the arrival burst at the target the
+		//host picked. Relayed by fxlabServerMassShifter the moment it jumps.
+		case ARCANE058:
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_MASS_SHIFTER_NITRO);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_SECONDARY_MASS_SHIFTER);
+			t->SetPosition(Position);
+			t->Start();
+
+			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+			t->SetStartTime(fxlabClientD->GetTime());
+			t->SetKeyID(FXLAB_ID_KEY_TELEPORT_OMNI_NITRO);
+			t->SetPosition(Position);
+			t->Start();
+
+			fxlabClientArcaneSoundImpulse(Position,EFF_TELEPORT_ADD);
 			break;
 
 		default:
@@ -1862,6 +1923,16 @@ void fxlabArcaneMassShifter::Start()
 	t->Start();
 };
 
+/*
+	The teleport and its two bursts are run by fxlabServerMassShifter, and the
+	arrival burst belongs at a checkpoint the host picks, not on the car. The
+	base relay would fire once with the car's own position, so it is suppressed
+	here and the arrival is relayed by the process at the moment it jumps.
+*/
+void fxlabArcaneMassShifter::InterruptUse()
+{
+}
+
 //------------------------------
 
 void fxlabExternalPowerArcane::Start()
@@ -2875,6 +2946,11 @@ void fxlabArcanePetard::InterruptAction()
 
 		ExplodePosition += Velocity * (CurrentTime * fxlabGlobalTimeRate);
 		ExplodePosition = CYCLE(ExplodePosition);
+
+		// The burst lands at a point the host works out from the throw, not on
+		// the car, so a client cannot derive it. The base relay would send the
+		// car's own position, so the place rides this interrupt instead.
+		mchNetArcaneInterrupt(RacerID,ArcaneID,ExplodePosition.x,ExplodePosition.y,ExplodePosition.z);
 
 		ct = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SPARK_GENERATOR);
 		ct->SetStartTime(fxlabClientD->GetTime());

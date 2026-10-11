@@ -263,7 +263,6 @@ static void net_send_snapshot(void)
 		s -> slot = (unsigned char)count;
 		s -> racer_id = (unsigned char)rp -> ID;
 		s -> kind = 0;
-		s -> place = 0;
 
 		count ++;
 		rp = rp -> next;

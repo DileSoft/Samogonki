@@ -238,6 +238,7 @@ struct fxlabArcaneKineticHit : fxlabImpulseArcane
 struct fxlabArcaneMassShifter : fxlabImpulseArcane
 {
 	void Start() override;
+	void InterruptUse() override;
 };
 
 struct fxlabArcaneJumpBall : fxlabImpulseArcane
