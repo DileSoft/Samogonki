@@ -383,6 +383,16 @@ void Mechos::disorganize()
 #endif
 }
 
+void Mechos::net_apply_state(int state)
+{
+	// Only the entry into the sequence has to be kicked off. Walking to the
+	// checkpoint, teleporting in and reassembling are this class's own machine
+	// and play on their own once it starts; the host's snapshots keep the body
+	// posed while the local parts do their thing.
+	if(state == STAYING_PERSONAGE && state_ == NORMAL_MECHOS)
+		disorganize();
+}
+
 Part* Mechos::detachPart(int part_id, int formic)
 {
 	cMesh* mesh = geometry -> FindMesh(part_id);

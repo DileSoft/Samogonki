@@ -196,6 +196,11 @@ static void net_send_snapshot(void)
 			s -> pos_z = net_q_height(pos.z);
 			s -> yaw = net_q_yaw(mr -> psi());
 
+			// The destroy-assemble sequence is host simulation: a client does
+			// not take damage, so without this it never leaves NORMAL_MECHOS
+			// and a wrecked car just keeps sliding around unbroken.
+			s -> mech_state = (unsigned char)mr -> state();
+
 			// Vglobal() rather than V: the member is protected, and a
 			// snapshot builder has no business reaching into it.
 			s -> vel_x = net_q_speed(mr -> Vglobal().x);
@@ -465,6 +470,12 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			part -> arcaneData.Power = net_uq_mana(racers[i].part_power[p],
 							       part -> arcaneData.MaxPower);
 			}
+
+		// The destroy-assemble sequence, kicked off on the transition out of
+		// NORMAL. It goes to the local car too: the client drives its own car
+		// but never damages it, so without this it would keep driving through
+		// its own explosion on every other machine.
+		mr -> net_apply_state(racers[i].mech_state);
 
 		if(racers[i].slot == local) continue;
 
@@ -746,10 +757,16 @@ static void net_apply_visual_event(const netEvent* e)
 		return;
 		}
 
-	// A cast. The sender built its own visual the moment it cast, before the
-	// event even left, so it is skipped.
-	if(e -> slot == net_match_S -> local_slot()) return;
+	/*
+		A cast. Every client builds it, the caster included.
 
+		The caster used to be skipped because it built its own visual the
+		moment it cast - but it built it with the ownerID sitting on the arcane
+		data, which is only whatever the last local trigger set, and a client
+		that casts without touching that path got nothing. The host names the
+		racer on every event, so the caster draws from here like everybody
+		else and the two cannot disagree.
+	*/
 	fxlabClientArcaneStart(e -> arcane_id,rp -> ID);
 }
 

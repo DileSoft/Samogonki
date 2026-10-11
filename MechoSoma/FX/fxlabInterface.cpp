@@ -1739,10 +1739,10 @@ void mchArcaneData::fxlabStart()
 		visible everywhere.
 	*/
 	if(mchNetGame && !mchNetHost){
-		// The host owns the effect, this machine owns only the look: build the
-		// visual pieces here and send the cast on. Before this the client saw
-		// nothing at all, not even its own spells.
-		fxlabClientArcaneStart(ID,ownerID);
+		// The host owns the effect, this machine owns only the look. The cast
+		// goes on, and the host broadcasts the visual back to every client -
+		// this one included - so the local build is not done here: doing both
+		// would draw the spell twice on the machine that cast it.
 		mchNetArcaneCast(ownerID,mchArcanePartOf(this),NET_EV_ARCANE_CAST,ID);
 		return;
 		}
