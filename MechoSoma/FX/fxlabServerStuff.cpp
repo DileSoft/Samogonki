@@ -2142,7 +2142,12 @@ void fxlabServerVoodooHead::Quant()
 					// Which head left its orbit, and who it caught. The
 					// client cannot work the victim out from the owner, so it
 					// is named on the event. No-op off the host.
-					mchNetArcaneLatch(GetOwnerID(),GetArcaneID(),mp -> ID);
+					//
+					// Not GetArcaneID(): an arcane stores its part index
+					// there (fxlabGeneralArcaneType::Start), so a head would
+					// report the part it sits on, not VoodooMaster, and the
+					// client's mirror is tagged with the real arcane id.
+					mchNetArcaneLatch(GetOwnerID(),ARCANE039,mp -> ID);
 					break;
 				};
 			};
