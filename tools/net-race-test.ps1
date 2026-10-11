@@ -217,6 +217,21 @@ try {
     }
     if ($hostSawEntities)   { Ok 'host reported live entities' }   else { Fail 'host reported no live entities during the race' }
     if ($clientSawEntities) { Ok 'client reported live entities' } else { Fail 'client reported no live entities during the race' }
+
+    # 6. The field is actually driving. Three of the five racers are bots and
+    #    have to move on their own, so a report below that means the AI or the
+    #    input routing is broken even though the handshake looked fine.
+    foreach ($side in @(@('host', $HostLog), @('client', $ClientLog))) {
+        $name = $side[0]; $log = $side[1]; $moved = -1
+        if (Test-Path $log) {
+            $line = Get-Content $log -ErrorAction SilentlyContinue |
+                    Select-String -Pattern '(\d+) of (\d+) racers moved' | Select-Object -Last 1
+            if ($line) { $moved = [int]$line.Matches[0].Groups[1].Value }
+        }
+        if ($moved -lt 0)        { Fail "${name} never reported racer motion" }
+        elseif ($moved -lt 3)    { Fail "${name}: only $moved racer(s) moved, expected the bots" }
+        else                     { Ok "${name}: $moved racers moving" }
+    }
 }
 finally {
     Stop-Target $clientProc

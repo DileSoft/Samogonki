@@ -375,7 +375,11 @@ void PointControlledObject::control()
 			#endif
 			point_control();
 			}
-		else if(net_controlled && active()){
+		else if(net_controlled){
+			// Not gated on active(): a net-controlled car is driven by its
+			// owner's packets, and "active" is a local concept that only ever
+			// names one car. On the host the client's car is net_controlled
+			// but not active, and active() here would leave it parked.
 			net_control(net_input);
 			}
 		else{

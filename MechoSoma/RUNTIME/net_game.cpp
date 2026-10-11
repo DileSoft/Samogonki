@@ -134,6 +134,11 @@ static int net_last_player_count = -1;
 static int net_camera_set = 0;
 static int net_start_logged = 0;
 
+// Last sampled position per slot, so the periodic log can say whether the
+// field is actually driving or just sitting there.
+static Vect3f net_motion_last[NET_MAX_PLAYERS];
+static int net_motion_have = 0;
+
 static const int NET_CONNECT_RETRY_MS = 500;
 
 // The host sends one snapshot per tick. Net ticks run at NET_TICK_MS, so this
@@ -380,6 +385,26 @@ static void net_apply_interpolation(void)
 }
 
 /*
+	The racer that belongs to a roster slot.
+
+	The race builds racers in slot order and numbers them ID = slot + 1, so
+	xtList::search() - which matches that ID - is off by one and hands back the
+	neighbouring car. Every slot-to-racer lookup in this file goes through here;
+	the list position is the slot.
+*/
+static mchRacer* net_racer_at(int slot)
+{
+	mchRacer* rp = mch_raceD -> racerLst -> first();
+
+	while(rp && slot > 0){
+		rp = rp -> next;
+		slot --;
+		}
+
+	return slot == 0 ? rp : NULL;
+}
+
+/*
 	Client side: put the host's view of a racer onto the local copy.
 
 	Pose goes only to the other machines. The local racer is driven by local
@@ -400,7 +425,7 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 
 	// The header's tick is the interpolation timeline. See the buffer below.
 	for(int i = 0; i < count; i ++){
-		mchRacer* rp = mch_raceD -> racerLst -> search(racers[i].slot);
+		mchRacer* rp = net_racer_at(racers[i].slot);
 		mchMechosRacer* mr;
 
 		if(!rp) continue;
@@ -854,6 +879,7 @@ void mchNetFinit(void)
 	net_last_player_count = -1;
 	net_start_logged = 0;
 	net_rnd_seeded = 0;
+	net_motion_have = 0;
 	net_event_q_count = 0;
 
 	mchNetStatusText = "";
@@ -940,16 +966,27 @@ static void net_update_ai(void)
 	while(rp){
 		if(slot != NET_SLOT_HOST){
 			int taken = net_match_S -> player(slot).is_present;
+			int ai = (rp -> flags & MCH_AI) != 0;
 
-			// AI_Toggle(,0) also removes the seeds the AI laid down. Without
-			// that the vehicle would still have control points and
-			// point_control() would win over the network input.
-			mch_raceD -> AI_Toggle(rp,taken ? 0 : 1);
+			/*
+				AI_Toggle() flips the flag, it does not set it: AI_Toggle(p,1)
+				on a car that is already AI turns the AI *off* and drops its
+				seeds. Calling it on every roster heartbeat therefore parked
+				every bot - they were built as AI, and the second the roster
+				was counted they stopped being AI. It is only called when the
+				AI state actually has to change.
 
-			if(taken)
+				A seated client takes its slot back from the AI; a slot nobody
+				drives gets the AI back.
+			*/
+			if(taken){
+				if(ai) mch_raceD -> AI_Toggle(rp,0);
 				rp -> set_net_control(1);
-			else
+				}
+			else {
+				if(!ai) mch_raceD -> AI_Toggle(rp,1);
 				rp -> set_net_control(0);
+				}
 			}
 
 		rp = rp -> next;
@@ -978,7 +1015,7 @@ static void net_send_client_input(void)
 
 	// mchRacer is only a PointControlledObject; reading controls is a Mechos
 	// capability, so the cast is through the concrete racer type.
-	rp = mch_raceD -> racerLst -> search(net_match_S -> local_slot());
+	rp = net_racer_at(net_match_S -> local_slot());
 	if(!rp) return;
 
 	mechos = dynamic_cast<mchMechosRacer*>(rp);
@@ -991,6 +1028,44 @@ static void net_send_client_input(void)
 	bytes = net_match_S -> build_input(payload,sizeof(payload),in);
 	if(bytes > 0)
 		net_match_S -> send_input(payload,bytes);
+}
+
+/*
+	How many racers actually moved since the last call.
+
+	Positions, not speeds: on a client a remote racer's velocity is not derived
+	from the snapshot, so a speed test would call a smooth interpolated car
+	parked. Anything past four units between two reports means it is driving.
+*/
+static void net_log_motion(void)
+{
+	mchRacer* rp = mch_raceD -> racerLst -> first();
+	int slot = 0,moved = 0,total = 0;
+
+	while(rp && slot < NET_MAX_PLAYERS){
+		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
+
+		if(mr){
+			const Vect3f& r = mr -> R();
+
+			if(net_motion_have){
+				float dx = r.x - net_motion_last[slot].x;
+				float dy = r.y - net_motion_last[slot].y;
+
+				if(dx*dx + dy*dy > 4.0f) moved ++;
+				}
+
+			net_motion_last[slot] = r;
+			total ++;
+			}
+
+		rp = rp -> next;
+		slot ++;
+		}
+
+	net_motion_have = 1;
+
+	net_log("%s: %d of %d racers moved",mchNetHost ? "host" : "client",moved,total);
 }
 
 void mchNetQuant(void)
@@ -1051,6 +1126,8 @@ void mchNetQuant(void)
 
 		net_log("%s: entities %d projectile, %d actor",
 			mchNetHost ? "host" : "client",projectiles,actors);
+
+		net_log_motion();
 		}
 
 	/* --------------------------- drive the race ------------------------- */
@@ -1083,7 +1160,7 @@ void mchNetQuant(void)
 		}
 
 	if(!mchNetHost && net_match_S -> local_slot() >= 0 && !net_client_ready){
-		mchRacer* rp = mch_raceD -> racerLst -> search(net_match_S -> local_slot());
+		mchRacer* rp = net_racer_at(net_match_S -> local_slot());
 		int slot = 0;
 
 		net_client_ready = 1;
