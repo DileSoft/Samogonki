@@ -236,6 +236,16 @@ static void net_send_snapshot(void)
 
 			s -> speed = (unsigned short)mr -> Vglobal().norm();
 
+		// Race standing. The result table and the HUD read these off every
+		// racer's own stats, and a client's remote cars are pose-driven - they
+		// never cross a checkpoint locally, so without this every remote car
+		// sits on lap one, checkpoint one, last place.
+		if(rp -> stPtr){
+			s -> lap = (unsigned char)rp -> stPtr -> Lap;
+			s -> checkpoint = (unsigned char)rp -> stPtr -> Checkpoint;
+			s -> place = (unsigned char)rp -> stPtr -> place;
+			}
+
 			// Arcane mana per part. The host is the only machine whose arcane
 			// drains, so this is what both a client bar and a client's own
 			// cast check have to read.
@@ -567,6 +577,15 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
 			net_local_auth_valid = 1;
 			continue;
+			}
+
+		// Race standing, host-authoritative like the pose. Only the remote
+		// cars need it: the local car computes its own as it drives, and the
+		// host's copy of a remote car is the one that crossed the line.
+		if(rp -> stPtr){
+			rp -> stPtr -> Lap = racers[i].lap;
+			rp -> stPtr -> Checkpoint = racers[i].checkpoint;
+			rp -> stPtr -> place = racers[i].place;
 			}
 
 		// Buffered, not applied: the draw interpolates between the last two

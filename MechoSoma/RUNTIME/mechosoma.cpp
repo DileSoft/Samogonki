@@ -1644,6 +1644,20 @@ void mchKeyTrap(void)
 		while(id != -1){
 			switch(id){
 				case MCH_KEY_EXIT:
+					/*
+						Escape, and a net race has no way out to the menu.
+
+						The session is live: leaving here ends this machine's
+						half of it, its snapshots stop, and every other machine
+						freezes on the last pose it saw - which is exactly the
+						"pause freezes the race" this was. A net race ends when
+						the race ends, or when the window is closed.
+					*/
+					if(mchNetGame){
+						mchNetWriteLog("host: escape ignored during the race");
+						break;
+						}
+
 					if(mch_iScreen)
 						quantRTO -> NextID = RTO_MAIN_MENU_ID;
 					else
