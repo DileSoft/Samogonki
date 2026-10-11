@@ -1708,6 +1708,12 @@ void mchKeyTrap(void)
 				break;
 #ifndef _FINAL_VERSION_
 			case VK_PAUSE:
+				// A net race has no local pause: the host's simulation is the
+				// only one, so freezing this machine freezes what everyone
+				// sees, and freezing a client stops it talking to the host.
+				if(mchNetGame)
+					break;
+
 				if(mchPBEM_CheckFlag(PBEM_REPLAY_MODE)){
 					if(!mchPBEM_Pause){
 						mchGameFlags |= MCH_STOP_TIME_FLAG | MCH_TOGGLE_PAUSE_FLAG;

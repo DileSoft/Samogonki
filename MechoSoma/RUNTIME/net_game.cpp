@@ -45,6 +45,22 @@ static void net_log(const char* fmt,...)
 	fflush(net_log_file);
 }
 
+// Same sink, for the other network translation units (net_fx.cpp), which have
+// no logger of their own. Kept as one function so both roles land in one file.
+void mchNetWriteLog(const char* fmt,...)
+{
+	if(!net_log_file) return;
+
+	va_list arg;
+
+	va_start(arg,fmt);
+	vfprintf(net_log_file,fmt,arg);
+	va_end(arg);
+
+	fprintf(net_log_file,"\n");
+	fflush(net_log_file);
+}
+
 static void net_log_open(void)
 {
 	// Named after the role, not a fixed name: a LAN test runs two copies of

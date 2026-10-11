@@ -333,6 +333,26 @@ void Body::setPosition(const Vect3f& pose, float psi)
 	setPositionInit();
 }
 
+/*
+	Like the above without the ground snap.
+
+	Replicated actors have to sit exactly where the host put them - mid air on
+	the way down, on a ramp, under a bridge - and the ground query would drop
+	every one of them onto the collision map at its x, y, which for an actor in
+	the air is a different place entirely. The pose is written as given.
+
+	Body::setPositionInit is called qualified on purpose: the per-class
+	overrides are spawn logic, not pose housekeeping. BonusMan's, for one,
+	teleports the body back to its drop height, so a replicated bonus man would
+	be yanked into the sky on every batch and never reach the ground.
+*/
+void Body::setPositionExact(const Vect3f& pose, float psi)
+{
+	setPose(MatXf(Mat3f(-psi, Z_AXIS), pose));
+	CYCLE(Xlg.trans());
+	Body::setPositionInit();
+}
+
 void Body::setPosition(const Vect3f& pose, const Vect3f& target)
 {
 	Vect3f dr = getDist(target, Vect3f(pose.x, pose.y, target.z));

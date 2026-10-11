@@ -882,13 +882,13 @@ static void net_fx_apply_actor_state(const netActorState* a,const netFxEntry* e)
 
 	if(!b || !b -> alive()) return;
 
-	// Vertical velocity is not carried: nothing would use it and a bonus
-	// man's arc is short enough that keeping whatever it already has between
-	// batches is closer than a number that crossed the wire.
-	b -> setPosition(Vect3f(net_uq_actor_pos(a -> pos_x),
-				net_uq_actor_pos(a -> pos_y),
-				net_uq_actor_pos(a -> pos_z)),
-			 net_uq_yaw(a -> yaw));
+	// Vertical velocity is not carried: nothing would use it and a bonus man's
+	// arc is short enough that keeping whatever it already has between batches
+	// is closer than a number that crossed the wire.
+	b -> setPositionExact(Vect3f(net_uq_actor_pos(a -> pos_x),
+				    net_uq_actor_pos(a -> pos_y),
+				    net_uq_actor_pos(a -> pos_z)),
+			     net_uq_yaw(a -> yaw));
 
 	b -> setGlobalVelocity(Vect3f(net_uq_signed_speed(a -> vel_x),
 				      net_uq_signed_speed(a -> vel_y),

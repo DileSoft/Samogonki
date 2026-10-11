@@ -260,6 +260,11 @@ public:
 	virtual void setPosition(const Vect3f& pose, float psi = 0);
 	void setPosition(const Vect3f& pose, const Vect3f& target);
 
+	// setPosition, but keeps the z given instead of dropping the body onto the
+	// collision map. For a replicated actor, which has to sit exactly where the
+	// host put it.
+	void setPositionExact(const Vect3f& pose, float psi = 0);
+
 	// Global velocity
 	float averageSpeed() const { return speed_avr; } // усредненная норма скорости
 

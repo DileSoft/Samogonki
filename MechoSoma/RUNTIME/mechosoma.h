@@ -191,6 +191,12 @@ void mchNetArcaneInterrupt(int ownerID,int arcane_id,float x,float y,float z);
 */
 void mchNetArcaneVisualStop(int ownerID,int arcane_id);
 
+/*
+	Write one line to the running net log from a layer that has no logger of
+	its own (net_fx.cpp). No-op when no race is running.
+*/
+void mchNetWriteLog(const char* fmt,...);
+
 // Read only, for the UI. All safe to call with no session running.
 int  mchNetIsActive(void);
 int  mchNetState(void);
