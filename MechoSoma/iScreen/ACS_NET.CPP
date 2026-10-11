@@ -109,7 +109,10 @@ enum {
 static int  nm_host = 1;
 static int  nm_conn = 0;		// 0 direct, 1 through the lobby server
 static char nm_addr[128] = "127.0.0.1";		// direct: the host to join
-static char nm_lobby_addr[128] = "127.0.0.1";	// lobby: the server address
+// Lobby: the server address. Saved to game.ini under [network] lobby_server,
+// so the same server is remembered between runs.
+static char nm_lobby_addr[128] = "dilesoft.ru";
+static char nm_lobby_saved[128] = "";		// last value written, to avoid rewrites
 static char nm_name[32]  = "";
 static char nm_game[NET_GAME_NAME_LEN] = "";
 static int  nm_fig = 1;			// mechos figure, 1..acsMaxEssenceID
@@ -558,6 +561,8 @@ static void nm_refresh(void)
 
 /* ---------------------------- starting the game -------------------------- */
 
+static void nm_capture_local(void);
+
 // Leave the menu for the loading screen. The same exit the F2 keypress used to
 // produce: the script's $MCH_SINGLE_GAME, the mode a net race rides.
 static void nm_leave_to_race(void)
@@ -570,6 +575,10 @@ static void nm_leave_to_race(void)
 
 static void nm_back_to_menu(void)
 {
+	// Read the fields back so an address typed and then abandoned is still
+	// remembered the next time the screen opens.
+	nm_capture_local();
+
 	// From the match list, back returns to the setup and drops the server
 	// connection: the browser was only looking, not seated.
 	if(nm_browse){
@@ -616,6 +625,14 @@ static void nm_capture_local(void)
 	nm_lobby_addr[sizeof(nm_lobby_addr) - 1] = 0;
 	nm_name[sizeof(nm_name) - 1] = 0;
 	nm_game[sizeof(nm_game) - 1] = 0;
+
+	// Remember a changed lobby server. An emptied field is left alone, so
+	// clearing it does not erase the saved value and drop the default.
+	if(nm_conn && nm_lobby_addr[0] && strcmp(nm_lobby_addr,nm_lobby_saved)){
+		strncpy(nm_lobby_saved,nm_lobby_addr,sizeof(nm_lobby_saved) - 1);
+		nm_lobby_saved[sizeof(nm_lobby_saved) - 1] = 0;
+		putIniKey(mch_mainINI,"network","lobby_server",nm_lobby_addr);
+	}
 
 	mchNetMenuFigure = nm_fig;
 	for(int i = 0; i < 3; i ++)
@@ -901,6 +918,21 @@ void acsInitNetMenu(void)
 		strncpy(nm_name,hsPlayers[0].name,sizeof(nm_name) - 1);
 	if(mchNetMenuName[0])
 		strncpy(nm_name,mchNetMenuName,sizeof(nm_name) - 1);
+
+	// The lobby server address persists in game.ini. Missing entry keeps the
+	// built-in default; the seeded "saved" copy stops the first action from
+	// writing the same value straight back.
+	{
+		const char* p = getIniKey(mch_mainINI,"network","lobby_server");
+
+		if(p && p[0]){
+			strncpy(nm_lobby_addr,p,sizeof(nm_lobby_addr) - 1);
+			nm_lobby_addr[sizeof(nm_lobby_addr) - 1] = 0;
+		}
+	}
+
+	strncpy(nm_lobby_saved,nm_lobby_addr,sizeof(nm_lobby_saved) - 1);
+	nm_lobby_saved[sizeof(nm_lobby_saved) - 1] = 0;
 
 	nm_fig = (mchDefaultFigure >= 0 ? mchDefaultFigure : 0) + 1;
 	if(mch_trackD && !mch_trackD -> FigureEnabledHS(nm_fig - 1))
