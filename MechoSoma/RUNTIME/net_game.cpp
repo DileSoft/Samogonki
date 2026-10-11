@@ -877,6 +877,56 @@ void mchNetArcaneVisualStop(int ownerID,int arcane_id)
 }
 
 /*
+	Host side: an arcane has latched onto a victim - a voodoo head reaching a
+	racer. What the client has to draw is one head leaving its orbit and homing
+	in, and it cannot work out the victim from the owner alone, so the victim's
+	slot rides on target_id.
+
+	Reliable, like a cast: a lost latch leaves the head orbiting as if it had
+	missed, and the host's copy keeps damaging either way.
+*/
+void mchNetArcaneLatch(int ownerID,int arcane_id,int victimID)
+{
+	netEvent* e;
+	mchRacer* rp;
+	int slot = 0;
+	int victim_slot = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!net_session_S || !net_match_S || !mch_raceD) return;
+	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+
+	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != ownerID){
+		rp = rp -> next;
+		slot ++;
+		}
+
+	if(!rp) return;
+
+	rp = mch_raceD -> racerLst -> first();
+
+	while(rp && rp -> ID != victimID){
+		rp = rp -> next;
+		victim_slot ++;
+		}
+
+	if(!rp) return;
+
+	e = &net_event_q[net_event_q_count ++];
+
+	memset(e,0,sizeof(netEvent));
+
+	e -> type = NET_EV_ARCANE_LATCH;
+	e -> slot = (unsigned char)slot;
+	e -> arcane_id = (unsigned char)arcane_id;
+	e -> target_id = (unsigned char)victim_slot;
+}
+
+/*
 	Client side: an arcane somebody else cast. Build only its visual.
 
 	The sender is skipped: it already built its own visual the moment it
@@ -889,7 +939,7 @@ static void net_apply_visual_event(const netEvent* e)
 	int slot = 0;
 
 	if(e -> type != NET_EV_ARCANE_CAST && e -> type != NET_EV_ARCANE_INTERRUPT &&
-	   e -> type != NET_EV_ARCANE_STOP_VISUAL) return;
+	   e -> type != NET_EV_ARCANE_STOP_VISUAL && e -> type != NET_EV_ARCANE_LATCH) return;
 	if(e -> slot >= NET_MAX_PLAYERS) return;
 
 	net_log("client: visual arcane %d type %d slot %d",(int)e -> arcane_id,(int)e -> type,(int)e -> slot);
@@ -921,6 +971,18 @@ static void net_apply_visual_event(const netEvent* e)
 					   Vect3f(net_uq_spawn_pos(e -> pos_x),
 						  net_uq_spawn_pos(e -> pos_y),
 						  net_uq_spawn_pos(e -> pos_z)));
+		return;
+		}
+
+	if(e -> type == NET_EV_ARCANE_LATCH){
+		// The victim is named by slot, the same way the caster is. It may be
+		// gone by now; a latch onto a wrecked car is a no-op.
+		mchRacer* vp = net_racer_at(e -> target_id);
+		mchMechosRacer* vm = vp ? dynamic_cast<mchMechosRacer*>(vp) : NULL;
+
+		if(vm)
+			fxlabClientArcaneLatch(e -> arcane_id,rp -> ID,vm -> ID);
+
 		return;
 		}
 
@@ -1362,6 +1424,7 @@ void mchNetQuant(void)
 			net_input_sent_count,net_input_recv_count);
 		}
 
+	/* --------------------------- drive the race ------------------------- */
 	/* --------------------------- drive the race ------------------------- */
 
 	players = net_match_S -> num_players();

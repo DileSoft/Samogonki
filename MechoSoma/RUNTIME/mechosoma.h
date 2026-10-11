@@ -192,6 +192,13 @@ void mchNetArcaneInterrupt(int ownerID,int arcane_id,float x,float y,float z);
 void mchNetArcaneVisualStop(int ownerID,int arcane_id);
 
 /*
+	Host side: an arcane latched onto a victim (a voodoo head reaching a
+	racer). The victim is named by racer id; the client turns that into the
+	corresponding head's SetTarget. No-op off the host.
+*/
+void mchNetArcaneLatch(int ownerID,int arcane_id,int victimID);
+
+/*
 	Write one line to the running net log from a layer that has no logger of
 	its own (net_fx.cpp). No-op when no race is running.
 */

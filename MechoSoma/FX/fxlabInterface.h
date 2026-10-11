@@ -79,6 +79,13 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id);
 void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const class Vect3f& pos);
 
 /*
+	Client side: the arcane latched onto a victim on the host (a voodoo head
+	reaching a racer), so one of its mirrored heads should leave its orbit and
+	home in. victim_id is the racer the host's head latched onto.
+*/
+void fxlabClientArcaneLatch(int arcane_id,int owner_id,int victim_id);
+
+/*
 	Client side: the arcane ended on the host, so drop the visual built for it.
 
 	Kills every client object the cast mirror tagged with this (owner, arcane),

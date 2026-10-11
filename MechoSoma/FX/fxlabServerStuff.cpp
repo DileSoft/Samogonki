@@ -2138,6 +2138,11 @@ void fxlabServerVoodooHead::Quant()
 					fxlabArcaneAction(this,TargetPoint->Mechos::ID);
 					if(HeadPoint.Process)
 						HeadPoint.Process->SetTarget(m);
+
+					// Which head left its orbit, and who it caught. The
+					// client cannot work the victim out from the owner, so it
+					// is named on the event. No-op off the host.
+					mchNetArcaneLatch(GetOwnerID(),GetArcaneID(),mp -> ID);
 					break;
 				};
 			};

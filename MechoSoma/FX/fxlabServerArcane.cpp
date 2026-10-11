@@ -649,6 +649,64 @@ void fxlabClientArcaneInterrupt(int arcane_id,int owner_id,const Vect3f& Positio
 }
 
 /*
+	Client side: the arcane latched onto a victim on the host, so one of the
+	mirrored heads should leave its orbit and home in - see
+	fxlabServerVoodooHead::Quant, which is where a head reaches a racer.
+
+	One head, not all five: the host latches the single head that hit and the
+	others keep circling. Every mirrored object of this arcane carries the
+	(owner, arcane) tag, and SetTarget is a no-op on anything that is not a
+	voodoo link, so the first tagged object is the right one.
+*/
+void fxlabClientArcaneLatch(int arcane_id,int owner_id,int victim_id)
+{
+	mchRacer* n;
+	mchMechosRacer* victim = NULL;
+	std::list<fxlabGeneralObjectType*>::iterator it;
+
+	if(!fxlabClientD) return;
+	if(!mch_raceD || !mch_raceD -> racerLst) return;
+
+	n = mch_raceD -> racerLst -> first();
+
+	while(n){
+		if(n -> ID == victim_id && n -> Type == MCH_RACER_TYPE_MECHOS){
+			victim = static_cast<mchMechosRacer*>(n);
+			break;
+			}
+		n = n -> next;
+		}
+
+	if(!victim) return;
+
+	it = fxlabClientD -> ObjectList.begin();
+
+	while(it != fxlabClientD -> ObjectList.end()){
+		fxlabGeneralObjectType* t = *it;
+
+		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id){
+			t -> SetTarget(victim);
+			return;
+			}
+
+		++ it;
+		}
+
+	it = fxlabClientD -> CreateList.begin();
+
+	while(it != fxlabClientD -> CreateList.end()){
+		fxlabGeneralObjectType* t = *it;
+
+		if(t -> NetArcaneOwner == owner_id && t -> NetArcaneID == arcane_id){
+			t -> SetTarget(victim);
+			return;
+			}
+
+		++ it;
+		}
+}
+
+/*
 	Client side: the arcane is over, so take its visual down.
 
 	The mirror of fxlabClientArcaneStart. Every object that function built was
