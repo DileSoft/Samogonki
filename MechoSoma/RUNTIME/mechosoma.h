@@ -161,6 +161,23 @@ void mchNetQuant(void);
 void mchNetArmRaceWorld(void);
 
 /*
+	The menu lobby. The session opens while the creation screen is still up so
+	players join and see each other before the race loads. The menu drives all
+	of these from iScreen/ACS_NET.CPP.
+*/
+int  mchNetLobbyHost(const char* host_name,const char* game_name,int figure,const int* spells);
+int  mchNetLobbyJoin(const char* addr,const char* player_name,int figure,const int* spells);
+void mchNetLobbyQuant(void);
+void mchNetLobbyClose(void);
+void mchNetLobbyHostStart(void);
+void mchNetLobbyClientArm(void);
+void mchNetLobbySetLocal(const char* name,int figure,const int* spells);
+void mchNetLobbySetGameName(const char* name);
+const char* mchNetGameName(void);
+int  mchNetPlayerFigure(int slot);
+int  mchNetLobbyStarted(void);
+
+/*
 	Called from the arcane machinery, never from the game loop.
 
 	mchArcaneData::fxlabStart() is the one place both arcane paths converge on -

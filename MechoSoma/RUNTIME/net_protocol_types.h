@@ -21,6 +21,10 @@ const int NET_KICK_TEXT_LEN	= 32;
 const int NET_MAX_PLAYERS	= 5;
 const int NET_ACTIVE_PARTS	= 4;
 
+// One mechos is a figure plus one arcane per remaining part. The lobby carries
+// that shape: NET_ACTIVE_PARTS - 1 spell part ids.
+const int NET_LOBBY_SPELLS	= NET_ACTIVE_PARTS - 1;
+
 // Maximum number of peers a host tracks.
 const int NET_MAX_PEERS		= 8;
 

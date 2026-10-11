@@ -39,6 +39,8 @@ struct netMatchPlayer
 	int is_present;
 	int ready;
 	unsigned int last_input_tick;	// newest sample seen, host side
+	int figure;			// mechos figure, 1..N, 0 until told
+	int spells[NET_LOBBY_SPELLS];	// arcane part id per spell slot
 	char name[NET_NAME_LEN];
 };
 
@@ -72,9 +74,43 @@ public:
 	// by the practice path.
 	void force_start(void);
 
+	// A lobby, not a race-in-waiting: the roster does not start the match on
+	// its own, the host decides. See the menu lobby.
+	void set_manual_start(int on);
+
+	// How long the host waits for the remote acknowledgements before starting
+	// anyway. The default is short because both sides are normally loaded
+	// already; the menu lobby sets it long enough to cover a world load.
+	void set_start_ack_timeout(int ms);
+
+	// The host's game name, shown in the lobby and re-sent with the roster.
+	void set_game_name(const char* name);
+	const char* game_name(void) const { return _game_name; }
+
+	// The world the next start will carry. open_host fixes an initial one;
+	// the lobby may change it before the host presses start.
+	void set_world(unsigned char world_id,unsigned char track_id,unsigned char laps);
+
+	// The host's own row (slot 0). Name and mechos, updated live from the
+	// lobby instead of only at open_host.
+	void set_local_player(const char* name,int figure,const int* spells);
+
 	// ---- client side ----
 	int  open_client(const char* player_name);
 	void set_ready(int on);
+
+	// Tell the host this client is leaving, so its slot frees at once rather
+	// than when the transport times the peer out.
+	void leave(void);
+
+	// The mechos this client brings. Kept so a later HELLO can carry it; set
+	// before connecting, or call again after to re-tell the host.
+	void set_client_mechos(int figure,const int* spells);
+
+	// Lobby only: hold the start acknowledgement until the race has loaded,
+	// so the host cannot begin before this machine is ready to run.
+	void set_defer_ack(int on);
+	void notify_loaded(void);
 
 	// ---- both sides ----
 	int  state(void) const { return _state; }
@@ -132,6 +168,15 @@ private:
 	unsigned char _world_id;
 	unsigned char _track_id;
 	unsigned char _laps;
+	char _game_name[NET_SERVER_NAME_LEN];
+
+	int _manual_start;		// host: do not start on a full roster
+	int _defer_ack;			// client: acknowledge a start only once loaded
+	int _loaded;			// client: the race is up
+	int _pending_start_ack;		// client: a prepare arrived before _loaded
+	int _start_ack_timeout_ms;
+	int _client_figure;		// client: mechos sent in its next HELLO
+	int _client_spells[NET_LOBBY_SPELLS];
 
 	unsigned int _start_tick;
 	unsigned int _start_time_ms;

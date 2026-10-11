@@ -33,6 +33,7 @@ void mchInitPartIDs(void);
 void acsInitNetMenu(void);
 int acsNetMenuKey(int key);
 int acsNetMenuExtEvent(int row,int dir);
+void acsNetMenuQuant(void);
 
 /* --------------------------- DEFINITION SECTION --------------------------- */
 
@@ -50,6 +51,22 @@ int acsNetMenuExtEvent(int row,int dir);
 	in the slot the website used to take (ACS_EXT.CPP). The original hot-seat
 	multiplayer screen (ACS_MULTIPLAYER_SCR, "Поочередный хот-сит" and friends)
 	is left exactly as it shipped.
+
+	Two phases share the one screen:
+
+	  setup   the host picks a name, a game name, a mechos and a world and
+	          presses "Create"; a client picks an address, a name and a
+	          mechos and presses "Connect";
+
+	  lobby   the session is up, the roster fills in live, and everybody sees
+	          who has joined and what they are driving - the row layout, one
+	          player per line, mirrors the hot-seat player list. The host
+	          presses "Start", the clients load the race the moment the host
+	          says so.
+
+	The rows are text, not the hot-seat's little mechos sprites: the sprite
+	path is tied to the arcane shop's redraw and pulling it in here would drag
+	the whole constructor in with it.
 */
 
 // Row object ids. Far from anything the script uses, so a hidden leftover
@@ -65,35 +82,49 @@ enum {
 	NM_SP2,
 	NM_SP3,
 	NM_WORLD,
-	NM_START,
+	NM_GAMENAME,
+	NM_PLAYHDR,
+	NM_LIST0,
+	NM_LIST1,
+	NM_LIST2,
+	NM_LIST3,
+	NM_LIST4,
+	NM_STATUS,
+	NM_ACTION,
 	NM_BACK,
 
 	NM_LAST
 };
 
-// What the menu holds until Start is pressed. nm_host/nm_addr default to the
-// command line so -nethost / -netjoin keep working as a shortcut for testing.
+// A row's label sits 100 above its value object.
+#define NM_LBL(x)	((x) + 100)
+
+// Keep in step with net_protocol_types.h NET_SERVER_NAME_LEN.
+#define NET_GAME_NAME_LEN 24
+
+// What the menu holds until the action is pressed. nm_host/nm_addr default to
+// the command line so -nethost / -netjoin keep working as a shortcut for
+// testing.
 static int  nm_host = 1;
 static char nm_addr[128] = "127.0.0.1";
 static char nm_name[32]  = "";
+static char nm_game[NET_GAME_NAME_LEN] = "";
 static int  nm_fig = 1;			// mechos figure, 1..acsMaxEssenceID
 static int  nm_sp[3] = { 1, 1, 1 };	// spell part ids, slots front/middle/rear
 static int  nm_world = 1;
 
 static int  nm_built = 0;
+static int  nm_lobby = 0;		// the session is up, the roster is shown
+static char nm_game_pushed[NET_GAME_NAME_LEN] = "";
 
 // The three spell slots are part indices 1..3 of the mechos: index 0 is the
 // figure itself, the rest carry one arcane each. The labels say front/middle/
 // rear, which is how the constructor orders them on screen.
 static const int nm_spell_slot[3] = { 1, 2, 3 };
 
-// Rows in the order they are shown and navigated. Labels are drawn at lx and
-// are inert; the value under each is the clickable object.
-static const int nm_row_id[]   = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
-static const int nm_label_id[] = { NM_HOST + 100,NM_ADDR + 100,NM_NAME + 100,NM_FIG + 100,
-				   NM_SP1 + 100,NM_SP2 + 100,NM_SP3 + 100,NM_WORLD + 100 };
+#define NM_ROWS 5		// roster lines drawn
 
-#define NM_ROWS ((int)(sizeof(nm_row_id)/sizeof(nm_row_id[0])))
+static const char* nm_world_str(int world);
 
 /* ------------------------------ helpers ---------------------------------- */
 
@@ -125,36 +156,47 @@ static int nm_is_ru(void)
 	return !strcmp(localization::getLanguage(),"ru");
 }
 
-static const char* nm_tr(int id)
+static const char* nm_pick(const char* en,const char* ru)
 {
-	static const char* en[] = {
-		"Network Race",			// NM_TITLE
-		"Mode:",			// NM_HOST
-		"Address:",			// NM_ADDR
-		"Name:",			// NM_NAME
-		"Mechos:",			// NM_FIG
-		"Front:",			// NM_SP1
-		"Middle:",			// NM_SP2
-		"Rear:",			// NM_SP3
-		"World:",			// NM_WORLD
-		"Start",			// NM_START
-		"Back"				// NM_BACK
-	};
-	static const char* ru[] = {
-		"\xD1\xE5\xF2\xE5\xE2\xE0\xFF \xE8\xE3\xF0\xE0",	// Сетевая игра
-		"\xD0\xE5\xE6\xE8\xEC:",				// Режим:
-		"\xC0\xE4\xF0\xE5\xF1:",				// Адрес:
-		"\xC8\xEC\xFF:",					// Имя:
-		"\xCC\xE5\xF5\xEE\xF1:",				// Мехос:
-		"\xCF\xE5\xF0\xE5\xE4:",				// Перед:
-		"\xD1\xE5\xF0\xE5\xE4\xE8\xED\xE0:",			// Середина:
-		"\xC7\xE0\xE4:",					// Зад:
-		"\xCC\xE8\xF0:",					// Мир:
-		"\xCD\xE0\xF7\xE0\xF2\xFC",				// Начать
-		"\xCD\xE0\xE7\xE0\xE4"					// Назад
-	};
+	return nm_is_ru() ? ru : en;
+}
 
-	return nm_is_ru() ? ru[id - NM_TITLE] : en[id - NM_TITLE];
+// A row label, keyed by the row's value id.
+static const char* nm_label_str(int row)
+{
+	switch(row){
+		case NM_HOST:     return nm_pick("Mode:","\xD0\xE5\xE6\xE8\xEC:");
+		case NM_ADDR:     return nm_pick("Address:","\xC0\xE4\xF0\xE5\xF1:");
+		case NM_NAME:     return nm_pick("Name:","\xC8\xEC\xFF:");
+		case NM_FIG:      return nm_pick("Mechos:","\xCC\xE5\xF5\xEE\xF1:");
+		case NM_SP1:      return nm_pick("Front:","\xCF\xE5\xF0\xE5\xE4:");
+		case NM_SP2:      return nm_pick("Middle:","\xD1\xE5\xF0\xE5\xE4\xE8\xED\xE0:");
+		case NM_SP3:      return nm_pick("Rear:","\xC7\xE0\xE4:");
+		case NM_WORLD:    return nm_pick("World:","\xCC\xE8\xF0:");
+		case NM_GAMENAME: return nm_pick("Game:","\xC8\xE3\xF0\xE0:");
+		case NM_PLAYHDR:  return nm_pick("Players:","\xC8\xE3\xF0\xEE\xEA\xE8:");
+		}
+	return "";
+}
+
+static const char* nm_title_str(void)
+{
+	return nm_pick("Network Race","\xD1\xE5\xF2\xE5\xE2\xE0\xFF \xE8\xE3\xF0\xE0");
+}
+
+static const char* nm_action_str(void)
+{
+	if(!nm_lobby)
+		return nm_host ? nm_pick("Create","\xD1\xEE\xE7\xE4\xE0\xF2\xFC \xE8\xE3\xF0\xF3")
+			       : nm_pick("Connect","\xCF\xEE\xE4\xEA\xEB\xFE\xF7\xE8\xF2\xFC\xF1\xFF");
+
+	return nm_host ? nm_pick("Start","\xCD\xE0\xF7\xE0\xF2\xFC")
+		       : nm_pick("Cancel","\xCE\xF2\xEC\xE5\xED\xE0");
+}
+
+static const char* nm_back_str(void)
+{
+	return nm_pick("Back","\xCD\xE0\xE7\xE0\xE4");
 }
 
 static const char* nm_host_str(void)
@@ -178,12 +220,6 @@ static const char* nm_spell_str(int slot)
 	return name ? name : "-";
 }
 
-static const char* nm_world_str(int world)
-{
-	const char* name = mch_trackD ? mch_trackD -> TrackName(world,0) : NULL;
-	return name ? name : "-";
-}
-
 // The bare value of a selector row: the label is a separate object.
 static void nm_format_value(int id,char* out,int sz)
 {
@@ -199,54 +235,10 @@ static void nm_format_value(int id,char* out,int sz)
 	(void)sz;
 }
 
-// The address is a client's, the world a host's, so the row that does not
-// apply is hidden. Navigation follows objIndex, and GetObjectXY skips a hidden
-// target, so the hidden row drops out of the list on its own.
-static void nm_apply_visibility(void)
+static const char* nm_world_str(int world)
 {
-	int i;
-
-	for(i = 0; i < NM_ROWS; i ++){
-		int show = 1;
-		aciScreenObject* v;
-		aciScreenObject* l;
-
-		if(nm_row_id[i] == NM_ADDR)  show = !nm_host;
-		if(nm_row_id[i] == NM_WORLD) show = nm_host;
-
-		v = nm_obj(nm_row_id[i]);
-		l = nm_obj(nm_label_id[i]);
-
-		if(v){
-			if(show) v -> flags &= ~(ACS_HIDDEN | ACS_BLOCKED);
-			else     v -> flags |=  (ACS_HIDDEN | ACS_BLOCKED);
-			v -> flags |= ACS_REDRAW_OBJECT;
-		}
-		if(l){
-			if(show) l -> flags &= ~(ACS_HIDDEN | ACS_BLOCKED);
-			else     l -> flags |=  (ACS_HIDDEN | ACS_BLOCKED);
-			l -> flags |= ACS_REDRAW_OBJECT;
-		}
-	}
-}
-
-// Refresh every value the state can change. Called on init and after a pick.
-static void nm_refresh(void)
-{
-	char buf[256];
-
-	nm_apply_visibility();
-
-	nm_format_value(NM_HOST,buf,sizeof(buf));  nm_set_text(NM_HOST,buf);
-	nm_format_value(NM_FIG,buf,sizeof(buf));   nm_set_text(NM_FIG,buf);
-	nm_format_value(NM_SP1,buf,sizeof(buf));   nm_set_text(NM_SP1,buf);
-	nm_format_value(NM_SP2,buf,sizeof(buf));   nm_set_text(NM_SP2,buf);
-	nm_format_value(NM_SP3,buf,sizeof(buf));   nm_set_text(NM_SP3,buf);
-	nm_format_value(NM_WORLD,buf,sizeof(buf)); nm_set_text(NM_WORLD,buf);
-
-	// Address and Name are edited in place: the field is the live text, so a
-	// refresh must not write the state variable back into it, or picking a
-	// mechos would wipe what the player typed. Seeded once at init.
+	const char* name = mch_trackD ? mch_trackD -> TrackName(world,0) : NULL;
+	return name ? name : "-";
 }
 
 /* --------------------------- cycling values ------------------------------ */
@@ -332,10 +324,192 @@ static void nm_cycle_world(int dir)
 	nm_world = id;
 }
 
+/* ------------------------------- lobby list ------------------------------ */
+
+// The candidate chain, in the order the cursor walks it. Only the visible ones
+// are linked, so hiding a row drops it out of keyboard navigation for free.
+static const int nm_chain[] = {
+	NM_GAMENAME, NM_HOST, NM_ADDR, NM_NAME, NM_FIG,NM_SP1,NM_SP2,NM_SP3,
+	NM_WORLD, NM_ACTION, NM_BACK
+};
+
+// Whether the cursor may land on a row right now.
+static int nm_row_visible(int id)
+{
+	if(id == NM_GAMENAME) return nm_host || nm_lobby;
+	if(id == NM_HOST)     return !nm_lobby;
+	if(id == NM_ADDR)     return !nm_host && !nm_lobby;
+	if(id == NM_NAME || id == NM_FIG ||
+	   id == NM_SP1 || id == NM_SP2 || id == NM_SP3) return !nm_lobby;
+	if(id == NM_WORLD)    return nm_host;
+	if(id == NM_ACTION || id == NM_BACK) return 1;
+	return 0;
+}
+
+static void nm_show(int id,int on)
+{
+	aciScreenObject* p;
+	aciScreenObject* l;
+
+	p = nm_obj(id);
+	if(p){
+		if(on) p -> flags &= ~(ACS_HIDDEN | ACS_BLOCKED);
+		else   p -> flags |=  (ACS_HIDDEN | ACS_BLOCKED);
+		p -> flags |= ACS_REDRAW_OBJECT;
+	}
+
+	l = nm_obj(NM_LBL(id));
+	if(l){
+		if(on) l -> flags &= ~(ACS_HIDDEN | ACS_BLOCKED);
+		else   l -> flags |=  (ACS_HIDDEN | ACS_BLOCKED);
+		l -> flags |= ACS_REDRAW_OBJECT;
+	}
+}
+
+// Show the rows the current phase needs, and relink the cursor chain over the
+// visible ones only.
+static void nm_apply_visibility(void)
+{
+	static int last_host = -1;
+	static int last_lobby = -1;
+	int i,k;
+	int vis[32];
+	int nvis = 0;
+
+	// Hiding a row only stops it being redrawn; the pixels it left behind
+	// stay until the background is cleared again. A phase switch therefore
+	// asks for a forced redraw, which is what makes the list appear instead
+	// of the setup rows it replaced.
+	if(last_host != nm_host || last_lobby != nm_lobby){
+		last_host = nm_host;
+		last_lobby = nm_lobby;
+		acsScrD -> flags |= ACS_FORCED_REDRAW;
+	}
+
+	// Every row that is not a plain label has a label object too.
+	const int rows[] = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,
+			     NM_WORLD,NM_GAMENAME,NM_PLAYHDR };
+	for(i = 0; i < (int)(sizeof(rows)/sizeof(rows[0])); i ++){
+		int id = rows[i];
+		int on;
+
+		if(id == NM_PLAYHDR) on = nm_lobby;
+		else on = nm_row_visible(id);
+
+		nm_show(id,on);
+	}
+
+	for(i = 0; i < NM_ROWS; i ++)
+		nm_show(NM_LIST0 + i,nm_lobby);
+
+	nm_show(NM_TITLE,1);
+	nm_show(NM_STATUS,nm_lobby);
+	nm_show(NM_ACTION,1);
+	nm_show(NM_BACK,1);
+
+	for(i = 0; i < (int)(sizeof(nm_chain)/sizeof(nm_chain[0])); i ++)
+		if(nm_row_visible(nm_chain[i]))
+			vis[nvis ++] = nm_chain[i];
+
+	for(k = 0; k < nvis; k ++){
+		aciScreenObject* p = nm_obj(vis[k]);
+		if(!p) continue;
+
+		p -> objIndex[1] = vis[(k + nvis - 1) % nvis];	// up
+		p -> objIndex[3] = vis[(k + 1) % nvis];		// down
+		p -> objIndex[0] = 0;
+		p -> objIndex[2] = 0;
+	}
+}
+
+// Refresh every value the state can change. Called on init, after a pick, and
+// once a frame while the lobby is up.
+static void nm_refresh(void)
+{
+	char buf[256];
+	aciScreenInputField* f;
+	int i;
+
+	nm_apply_visibility();
+
+	nm_format_value(NM_HOST,buf,sizeof(buf));  nm_set_text(NM_HOST,buf);
+	nm_format_value(NM_FIG,buf,sizeof(buf));   nm_set_text(NM_FIG,buf);
+	nm_format_value(NM_SP1,buf,sizeof(buf));   nm_set_text(NM_SP1,buf);
+	nm_format_value(NM_SP2,buf,sizeof(buf));   nm_set_text(NM_SP2,buf);
+	nm_format_value(NM_SP3,buf,sizeof(buf));   nm_set_text(NM_SP3,buf);
+	nm_format_value(NM_WORLD,buf,sizeof(buf)); nm_set_text(NM_WORLD,buf);
+
+	// Address and Name are edited in place: the field is the live text, so a
+	// refresh must not write the state variable back into it, or picking a
+	// mechos would wipe what the player typed. Seeded once at init; live in
+	// the lobby they are read back into the state instead.
+	//
+	// The game name is the exception: it is pushed to the host every frame so
+	// a rename reaches the clients without a message of its own.
+	if(nm_host && (f = (aciScreenInputField*)nm_obj(NM_GAMENAME))){
+		if(strcmp(f -> string,nm_game_pushed)){
+			strncpy(nm_game_pushed,f -> string,sizeof(nm_game_pushed) - 1);
+			nm_game_pushed[sizeof(nm_game_pushed) - 1] = 0;
+			mchNetLobbySetGameName(nm_game_pushed);
+		}
+	}
+
+	// A client only reads the game name; it comes from the host's roster.
+	if(!nm_host && nm_lobby)
+		nm_set_text(NM_GAMENAME,mchNetGameName());
+
+	nm_set_text(NM_TITLE,nm_title_str());
+	nm_set_text(NM_ACTION,nm_action_str());
+	nm_set_text(NM_BACK,nm_back_str());
+	for(i = 0; i < (int)(sizeof(nm_chain)/sizeof(nm_chain[0])); i ++)
+		nm_set_text(NM_LBL(nm_chain[i]),nm_label_str(nm_chain[i]));
+
+	// Roster lines and status.
+	for(i = 0; i < NM_ROWS; i ++){
+		const char* name = nm_lobby ? mchNetPlayerName(i) : "";
+		int fig = nm_lobby ? mchNetPlayerFigure(i) : 0;
+
+		if(name && name[0])
+			sprintf(buf,"%s - %s",name,fig ? nm_figure_str(fig) : "-");
+		else
+			sprintf(buf,"-");
+
+		nm_set_text(NM_LIST0 + i,buf);
+	}
+
+	if(nm_lobby){
+		// The local row is the one this machine owns; mark it so a player can
+		// find themselves in the list at a glance.
+		sprintf(buf,"%s %d",nm_pick("Players:","\xC8\xE3\xF0\xEE\xEA\xE8:"),
+			mchNetNumPlayers());
+		nm_set_text(NM_STATUS,buf);
+	}
+}
+
 /* ---------------------------- starting the game -------------------------- */
+
+// Leave the menu for the loading screen. The same exit the F2 keypress used to
+// produce: the script's $MCH_SINGLE_GAME, the mode a net race rides.
+static void nm_leave_to_race(void)
+{
+	nm_lobby = 0;
+
+	acsScrD -> QuantCode = 2;
+	acsScrD -> flags |= ACS_NEED_EXIT;
+}
 
 static void nm_back_to_menu(void)
 {
+	// In the lobby, back means back to the setup: the host can change
+	// something and create the game again, the client can edit and reconnect.
+	// A second back, from the setup, leaves for the main menu.
+	if(nm_lobby){
+		mchNetLobbyClose();
+		nm_lobby = 0;
+		nm_refresh();
+		return;
+	}
+
 	if(acsNumSaves < 1)
 		acsScrD -> PrepareChangeScreen(ACS_MAIN_MENU_SCR0);
 	else if(acsNumSaves == 1)
@@ -344,27 +518,18 @@ static void nm_back_to_menu(void)
 		acsScrD -> PrepareChangeScreen(ACS_MAIN_MENU_SCR2);
 }
 
-static void nm_start_game(void)
+// Read the live text fields back into the state, then hand the local player's
+// pick to the race loader.
+static void nm_capture_local(void)
 {
 	aciScreenInputField* f;
 
-	// The address and the name are edited in place, so the field holds the
-	// live text and the state variables do not. Read them back here.
 	if((f = (aciScreenInputField*)nm_obj(NM_ADDR))) strncpy(nm_addr,f -> string,sizeof(nm_addr) - 1);
 	if((f = (aciScreenInputField*)nm_obj(NM_NAME))) strncpy(nm_name,f -> string,sizeof(nm_name) - 1);
+	if((f = (aciScreenInputField*)nm_obj(NM_GAMENAME))) strncpy(nm_game,f -> string,sizeof(nm_game) - 1);
 	nm_addr[sizeof(nm_addr) - 1] = 0;
 	nm_name[sizeof(nm_name) - 1] = 0;
-
-	mchNetGame = 1;
-	mchNetHost = nm_host;
-
-	if(!nm_host){
-		strncpy(mchNetJoinAddr,nm_addr,sizeof(mchNetJoinAddr) - 1);
-		mchNetJoinAddr[sizeof(mchNetJoinAddr) - 1] = 0;
-	}
-
-	strncpy(mchNetMenuName,nm_name,sizeof(mchNetMenuName) - 1);
-	mchNetMenuName[sizeof(mchNetMenuName) - 1] = 0;
+	nm_game[sizeof(nm_game) - 1] = 0;
 
 	mchNetMenuFigure = nm_fig;
 	for(int i = 0; i < 3; i ++)
@@ -372,27 +537,54 @@ static void nm_start_game(void)
 
 	sprintf(mchNetRacerConfig,"%d %d %d %d",nm_fig,nm_sp[0],nm_sp[1],nm_sp[2]);
 
-	// Five laps, always.
+	strncpy(mchNetMenuName,nm_name[0] ? nm_name : "player",sizeof(mchNetMenuName) - 1);
+	mchNetMenuName[sizeof(mchNetMenuName) - 1] = 0;
+
 	mchNumLaps = 5;
 	mchNetMenuWorld = nm_world;
 	mchNetMenuTrack = 0;
+}
 
-	// Both sides have to load the same world before the race can start, and
-	// the loading screen reads mchCurrentWorld. The host's is its pick; a
-	// client's must match it (a lobby that ships the world to waiting clients
-	// is the next step - until then both pick the same one).
-	mchCurrentWorld = nm_world;
-	mchCurrentTrack = 0;
+// The action button. Host: create the lobby, then start it. Client: connect,
+// then leave the lobby.
+static void nm_action(void)
+{
+	nm_capture_local();
 
-	// What ACS_EXT_SET_GAME_MODE would have cleared for a non hot-seat mode,
-	// since this path skips it.
-	mchSplitScreenGame = 0;
-	mchTurnBasedGame = 0;
+	if(!nm_lobby){
+		int ok;
 
-	// Same exit the F2 keypress used to produce: the script's
-	// $MCH_SINGLE_GAME, the mode a net race rides.
-	acsScrD -> QuantCode = 2;
-	acsScrD -> flags |= ACS_NEED_EXIT;
+		if(nm_host){
+			mchNetMenuWorld = nm_world;
+			mchNetMenuTrack = 0;
+			ok = mchNetLobbyHost(nm_name[0] ? nm_name : "host",
+					     nm_game,
+					     nm_fig,nm_sp);
+			}
+		else {
+			ok = mchNetLobbyJoin(nm_addr,
+					     nm_name[0] ? nm_name : "player",
+					     nm_fig,nm_sp);
+			}
+
+		if(ok){
+			nm_lobby = 1;
+			mchNetLobbySetGameName(nm_game);
+			nm_refresh();
+		}
+		return;
+	}
+
+	if(nm_host){
+		mchNetLobbyHostStart();
+		nm_leave_to_race();
+		return;
+	}
+
+	// Client: cancel and go back to setup.
+	mchNetLobbyClose();
+	nm_lobby = 0;
+	nm_refresh();
 }
 
 /* ------------------------------- building -------------------------------- */
@@ -518,56 +710,60 @@ void acsInitNetMenu(void)
 	// Parts must be known before any spell default or cycle touches the pool.
 	nm_ensure_pool();
 
-	const int lx = 40, vx = 260, w = 340, dy = 30;
+	const int lx = 40, vx = 260, w = 340;
 
 	// Title.
-	nm_add_field(scr,proto,NM_TITLE,lx,40,w,32);
+	nm_add_field(scr,proto,NM_TITLE,lx,30,w,32);
 
-	// Label + value per row.
-	y = 80;
-	for(i = 0; i < NM_ROWS; i ++){
-		nm_add_field(scr,proto,nm_label_id[i],lx,y,w,32);
-		nm_add_field(scr,proto,nm_row_id[i],vx,y,w,110);
-		y += dy;
+	// Game name row.
+	nm_add_field(scr,proto,NM_LBL(NM_GAMENAME),lx,70,w,32);
+	nm_add_field(scr,proto,NM_GAMENAME,vx,70,w,NET_GAME_NAME_LEN);
+
+	// Setup rows.
+	y = 110;
+	{
+		const int rows[] = { NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
+		for(i = 0; i < (int)(sizeof(rows)/sizeof(rows[0])); i ++){
+			nm_add_field(scr,proto,NM_LBL(rows[i]),lx,y,w,32);
+			nm_add_field(scr,proto,rows[i],vx,y,w,110);
+			y += 28;
+		}
 	}
 
-	// Start and Back, at the foot of the list.
-	nm_add_field(scr,proto,NM_START,lx,y + 20,w,32);
-	nm_add_field(scr,proto,NM_BACK,lx,y + 50,w,32);
+	// Roster list: header plus five lines, one per slot, laid over the setup
+	// rows' space - only one of the two is ever visible.
+	nm_add_field(scr,proto,NM_LBL(NM_PLAYHDR),lx,110,w,32);
+	for(i = 0; i < NM_ROWS; i ++)
+		nm_add_field(scr,proto,NM_LIST0 + i,vx - 220,138 + 28 * i,w + 220,80);
 
-	// Navigation: up/down walk the list, left/right are eaten by
-	// acsNetMenuKey() while standing on a selector.
-	for(i = 0; i < NM_ROWS; i ++){
-		aciScreenObject* o = nm_obj(nm_row_id[i]);
-		if(!o) continue;
-		o -> objIndex[1] = (i > 0) ? nm_row_id[i - 1] : nm_row_id[NM_ROWS - 1];
-		o -> objIndex[3] = (i + 1 < NM_ROWS) ? nm_row_id[i + 1] : NM_START;
-	}
+	// Status, action, back.
+	nm_add_field(scr,proto,NM_STATUS,lx,330,w,80);
+	nm_add_field(scr,proto,NM_ACTION,lx,370,w,32);
+	nm_add_field(scr,proto,NM_BACK,lx,400,w,32);
 
 	// Events. Selectors take left/right clicks as value changes; text rows
-	// open the editor; Start and Back act.
-	for(i = 0; i < NM_ROWS; i ++){
-		aciScreenObject* o = nm_obj(nm_row_id[i]);
+	// open the editor; action and back act once, below.
+	for(i = 0; i < (int)(sizeof(nm_chain)/sizeof(nm_chain[0])); i ++){
+		int id = nm_chain[i];
+		aciScreenObject* o = nm_obj(id);
 		if(!o) continue;
 
-		if(nm_row_id[i] == NM_ADDR || nm_row_id[i] == NM_NAME){
-			nm_add_event(o,VK_MOUSE_LBUTTON,nm_row_id[i],0);
+		// Action and back are wired separately: adding them here as well
+		// would fire them twice per click, and one click would both create
+		// the lobby and start the race.
+		if(id == NM_ACTION || id == NM_BACK) continue;
+
+		if(id == NM_ADDR || id == NM_NAME || id == NM_GAMENAME){
+			nm_add_event(o,VK_MOUSE_LBUTTON,id,0);
 		}
 		else {
-			nm_add_event(o,VK_MOUSE_LBUTTON,nm_row_id[i],1);
-			nm_add_event(o,VK_MOUSE_RBUTTON,nm_row_id[i],-1);
+			nm_add_event(o,VK_MOUSE_LBUTTON,id,1);
+			nm_add_event(o,VK_MOUSE_RBUTTON,id,-1);
 		}
 	}
 
-	if((p = nm_obj(NM_START))) nm_add_event(p,VK_MOUSE_LBUTTON,NM_START,0);
+	if((p = nm_obj(NM_ACTION))) nm_add_event(p,VK_MOUSE_LBUTTON,NM_ACTION,0);
 	if((p = nm_obj(NM_BACK)))  nm_add_event(p,VK_MOUSE_LBUTTON,NM_BACK,0);
-
-	// Fill in the strings: title, labels, then the live values.
-	nm_set_text(NM_TITLE,nm_tr(NM_TITLE));
-	for(i = 0; i < NM_ROWS; i ++)
-		nm_set_text(nm_label_id[i],nm_tr(nm_row_id[i]));
-	nm_set_text(NM_START,nm_tr(NM_START));
-	nm_set_text(NM_BACK,nm_tr(NM_BACK));
 
 	// Seed the defaults from the command line and the engine's own defaults,
 	// so the menu opens on something sensible.
@@ -575,6 +771,8 @@ void acsInitNetMenu(void)
 		strncpy(nm_addr,mchNetJoinAddr,sizeof(nm_addr) - 1);
 	if(hsPlayers[0].name[0])
 		strncpy(nm_name,hsPlayers[0].name,sizeof(nm_name) - 1);
+	if(mchNetMenuName[0])
+		strncpy(nm_name,mchNetMenuName,sizeof(nm_name) - 1);
 
 	nm_fig = (mchDefaultFigure >= 0 ? mchDefaultFigure : 0) + 1;
 	if(mch_trackD && !mch_trackD -> FigureEnabledHS(nm_fig - 1))
@@ -630,31 +828,43 @@ int acsNetMenuExtEvent(int row,int dir)
 {
 	switch(row){
 		case NM_HOST:
+			if(nm_lobby) return 1;
 			nm_host = !nm_host;
 			break;
 		case NM_ADDR:
+			if(nm_host || nm_lobby) return 1;
 			acsScrD -> PrepareInput(NM_ADDR);
 			return 1;
 		case NM_NAME:
+			if(nm_lobby) return 1;
 			acsScrD -> PrepareInput(NM_NAME);
 			return 1;
+		case NM_GAMENAME:
+			if(!nm_host) return 1;
+			acsScrD -> PrepareInput(NM_GAMENAME);
+			return 1;
 		case NM_FIG:
+			if(nm_lobby) return 1;
 			nm_cycle_figure(dir ? 1 : -1);
 			break;
 		case NM_SP1:
+			if(nm_lobby) return 1;
 			nm_cycle_spell(0,dir ? 1 : -1);
 			break;
 		case NM_SP2:
+			if(nm_lobby) return 1;
 			nm_cycle_spell(1,dir ? 1 : -1);
 			break;
 		case NM_SP3:
+			if(nm_lobby) return 1;
 			nm_cycle_spell(2,dir ? 1 : -1);
 			break;
 		case NM_WORLD:
+			if(!nm_host) return 1;
 			nm_cycle_world(dir ? 1 : -1);
 			break;
-		case NM_START:
-			nm_start_game();
+		case NM_ACTION:
+			nm_action();
 			return 1;
 		case NM_BACK:
 			nm_back_to_menu();
@@ -665,4 +875,27 @@ int acsNetMenuExtEvent(int row,int dir)
 
 	nm_refresh();
 	return 1;
+}
+
+/* ------------------------------ per frame -------------------------------- */
+
+/*
+	Called once a frame from acsQuant while the screen is up. Pumps the lobby
+	and pulls the roster into the list. A client that sees the host's start
+	leaves the menu and loads.
+*/
+void acsNetMenuQuant(void)
+{
+	if(!nm_built || !nm_lobby) return;
+
+	mchNetLobbyQuant();
+
+	if(!nm_host && mchNetLobbyStarted()){
+		nm_capture_local();
+		mchNetLobbyClientArm();
+		nm_leave_to_race();
+		return;
+	}
+
+	nm_refresh();
 }

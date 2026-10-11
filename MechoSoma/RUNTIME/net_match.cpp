@@ -42,6 +42,16 @@ netMatch::netMatch(netSession* sess) : _sess(sess)
 	_world_id = 0;
 	_track_id = 0;
 	_laps = 0;
+	_game_name[0] = 0;
+
+	_manual_start = 0;
+	_defer_ack = 0;
+	_loaded = 0;
+	_pending_start_ack = 0;
+	_start_ack_timeout_ms = NET_START_ACK_MS;
+	_client_figure = 0;
+	for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+		_client_spells[i] = 0;
 
 	_start_tick = 0;
 	_start_time_ms = 0;
@@ -84,6 +94,9 @@ void netMatch::reset_roster(void)
 		_players[i].is_present = 0;
 		_players[i].ready = 0;
 		_players[i].last_input_tick = 0;
+		_players[i].figure = 0;
+		for(int j = 0; j < NET_LOBBY_SPELLS; j ++)
+			_players[i].spells[j] = 0;
 		_players[i].name[0] = 0;
 		}
 
@@ -167,6 +180,12 @@ int netMatch::open_host(const char* server_name,unsigned char world_id,unsigned 
 	_track_id = track_id;
 	_laps = laps;
 
+	_manual_start = 0;
+	_defer_ack = 0;
+	_loaded = 0;
+	_pending_start_ack = 0;
+	_start_ack_timeout_ms = NET_START_ACK_MS;
+
 	reset_roster();
 
 	_players[NET_SLOT_HOST].is_present = 1;
@@ -176,6 +195,13 @@ int netMatch::open_host(const char* server_name,unsigned char world_id,unsigned 
 	if(server_name){
 		strncpy(_players[NET_SLOT_HOST].name,server_name,NET_NAME_LEN - 1);
 		_players[NET_SLOT_HOST].name[NET_NAME_LEN - 1] = 0;
+
+		// A game name of its own is set with set_game_name; until then the
+		// host's own name is the best guess at what to show.
+		if(!_game_name[0]){
+			strncpy(_game_name,server_name,NET_SERVER_NAME_LEN - 1);
+			_game_name[NET_SERVER_NAME_LEN - 1] = 0;
+			}
 		}
 
 	_num_ready = 1;
@@ -204,6 +230,10 @@ int netMatch::open_client(const char* player_name)
 	hello.proto_version = (unsigned short)NET_PROTO_VERSION;
 	hello.client_build = (unsigned char)NET_PROTO_VERSION;
 	hello.input_rate_hz = (unsigned char)NET_TICK_RATE_HZ;
+	hello.figure = (unsigned char)_client_figure;
+
+	for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+		hello.spells[i] = (unsigned char)_client_spells[i];
 
 	if(player_name){
 		strncpy((char*)hello.name,player_name,NET_NAME_LEN - 1);
@@ -214,6 +244,9 @@ int netMatch::open_client(const char* player_name)
 	_sess -> send(peer,NET_MSG_HELLO,&hello,sizeof(hello),1);
 
 	reset_roster();
+
+	_loaded = 0;
+	_pending_start_ack = 0;
 
 	return 1;
 }
@@ -233,6 +266,138 @@ void netMatch::set_ready(int on)
 		}
 
 	mark_ready(_local_slot,on);
+}
+
+void netMatch::leave(void)
+{
+	netLeave l;
+	int peer;
+
+	if(_is_host) return;
+
+	peer = server_peer();
+
+	if(peer >= 0){
+		memset(&l,0,sizeof(l));
+		l.reason = 0;
+
+		// Reliable: the one send is worth a retransmit the transport will not
+		// get to make if the socket closes straight after.
+		_sess -> send(peer,NET_MSG_LEAVE,&l,sizeof(l),1);
+		}
+}
+
+void netMatch::set_client_mechos(int figure,const int* spells)
+{
+	_client_figure = figure;
+
+	for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+		_client_spells[i] = spells ? spells[i] : 0;
+}
+
+void netMatch::set_defer_ack(int on)
+{
+	_defer_ack = !!on;
+}
+
+void netMatch::set_manual_start(int on)
+{
+	_manual_start = !!on;
+}
+
+void netMatch::set_start_ack_timeout(int ms)
+{
+	_start_ack_timeout_ms = ms;
+}
+
+void netMatch::set_game_name(const char* name)
+{
+	if(!name) name = "";
+
+	strncpy(_game_name,name,NET_SERVER_NAME_LEN - 1);
+	_game_name[NET_SERVER_NAME_LEN - 1] = 0;
+
+	// Push it now rather than waiting for the roster heartbeat.
+	if(_is_host) roster_changed();
+}
+
+void netMatch::set_world(unsigned char world_id,unsigned char track_id,unsigned char laps)
+{
+	_world_id = world_id;
+	_track_id = track_id;
+	_laps = laps;
+}
+
+void netMatch::set_local_player(const char* name,int figure,const int* spells)
+{
+	netMatchPlayer* p;
+
+	if(_is_host){
+		p = &_players[NET_SLOT_HOST];
+
+		if(name){
+			strncpy(p -> name,name,NET_NAME_LEN - 1);
+			p -> name[NET_NAME_LEN - 1] = 0;
+			}
+
+		p -> figure = figure;
+		for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+			p -> spells[i] = spells ? spells[i] : 0;
+
+		roster_changed();
+		return;
+		}
+
+	// A client's row is the host's to change, so this turns into a fresh
+	// HELLO carrying the new mechos.
+	set_client_mechos(figure,spells);
+
+	{
+		int peer = server_peer();
+
+		if(peer >= 0){
+			netHello hello;
+
+			memset(&hello,0,sizeof(hello));
+			hello.proto_version = (unsigned short)NET_PROTO_VERSION;
+			hello.client_build = (unsigned char)NET_PROTO_VERSION;
+			hello.input_rate_hz = (unsigned char)NET_TICK_RATE_HZ;
+			hello.figure = (unsigned char)_client_figure;
+
+			for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+				hello.spells[i] = (unsigned char)_client_spells[i];
+
+			if(name){
+				strncpy((char*)hello.name,name,NET_NAME_LEN - 1);
+				hello.name[NET_NAME_LEN - 1] = 0;
+				}
+
+			_sess -> send(peer,NET_MSG_HELLO,&hello,sizeof(hello),1);
+			}
+		}
+}
+
+void netMatch::notify_loaded(void)
+{
+	_loaded = 1;
+
+	// A prepare that arrived while the race was still loading can be
+	// acknowledged now: this is the signal the host has been waiting for.
+	if(_pending_start_ack && _state == NET_MATCH_STARTING){
+		netReady ack;
+		int peer = server_peer();
+
+		_pending_start_ack = 0;
+
+		if(peer >= 0){
+			memset(&ack,0,sizeof(ack));
+			ack.ready = 2;
+
+			_sess -> send(peer,NET_MSG_READY,&ack,sizeof(ack),1);
+			}
+
+		mark_ready(_local_slot,1);
+		}
 }
 
 int netMatch::build_input(unsigned char* buf,int buf_size,const netInput& in)
@@ -315,6 +480,9 @@ int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 
 			if(len < (unsigned int)sizeof(netRosterHeader)) return 1;
 
+			strncpy(_game_name,(const char*)hdr -> game_name,NET_SERVER_NAME_LEN - 1);
+			_game_name[NET_SERVER_NAME_LEN - 1] = 0;
+
 			reset_roster();
 
 			for(int i = 0; i < hdr -> count && off + (int)sizeof(netRosterEntry) <= (int)len; i ++){
@@ -328,6 +496,9 @@ int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 				_players[slot].slot = slot;
 				_players[slot].is_present = (e -> state != NET_ROSTER_FREE);
 				_players[slot].ready = (e -> state == NET_ROSTER_READY || e -> state == NET_ROSTER_RACING);
+				_players[slot].figure = e -> figure;
+				for(int j = 0; j < NET_LOBBY_SPELLS; j ++)
+					_players[slot].spells[j] = e -> spells[j];
 				strncpy(_players[slot].name,(const char*)e -> name,NET_NAME_LEN - 1);
 				_players[slot].name[NET_NAME_LEN - 1] = 0;
 				}
@@ -353,16 +524,24 @@ int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 			// Step one of the handshake: acknowledge so the host knows the
 			// message is safely in our inbox before it commits to a tick.
 			if(sg -> flags & NET_START_PREPARE){
-				netReady ack;
-				int peer = server_peer();
-
 				_state = NET_MATCH_STARTING;
 
-				if(peer >= 0){
-					memset(&ack,0,sizeof(ack));
-					ack.ready = 2;	// "acknowledged the start"
+				// In the menu lobby the race is loaded after this message, so
+				// the acknowledgement has to wait for that: the host would
+				// otherwise begin while this machine is still loading a world.
+				if(_defer_ack && !_loaded){
+					_pending_start_ack = 1;
+					}
+				else {
+					netReady ack;
+					int peer = server_peer();
 
-					_sess -> send(peer,NET_MSG_READY,&ack,sizeof(ack),1);
+					if(peer >= 0){
+						memset(&ack,0,sizeof(ack));
+						ack.ready = 2;	// "acknowledged the start"
+
+						_sess -> send(peer,NET_MSG_READY,&ack,sizeof(ack),1);
+						}
 					}
 
 				set_status("Starting");
@@ -454,6 +633,9 @@ void netMatch::send_roster(int reliable)
 	hdr -> flags = 0;
 	hdr -> server_tick = _sess -> tick();
 
+	memset(hdr -> game_name,0,NET_SERVER_NAME_LEN);
+	strncpy((char*)hdr -> game_name,_game_name,NET_SERVER_NAME_LEN - 1);
+
 	for(int i = 0; i < NET_MAX_PLAYERS; i ++)
 		hdr -> ping[i] = 0;
 
@@ -467,6 +649,9 @@ void netMatch::send_roster(int reliable)
 		e -> state = (unsigned char)(p.ready ? NET_ROSTER_READY : NET_ROSTER_CONNECTING);
 		e -> racer_id = (unsigned char)i;
 		e -> kind = 0;
+		e -> figure = (unsigned char)(p.figure > 0 ? p.figure : 0);
+		for(int j = 0; j < NET_LOBBY_SPELLS; j ++)
+			e -> spells[j] = (unsigned char)(p.spells[j] > 0 ? p.spells[j] : 0);
 		memset(e -> name,0,NET_NAME_LEN);
 		strncpy((char*)e -> name,p.name,NET_NAME_LEN - 1);
 
@@ -601,20 +786,35 @@ int netMatch::handle_host_message(int peer_id,int type,const void* data,unsigned
 				_players[slot].ready = 0;
 				_players[slot].last_input_tick = 0;
 				_players[slot].name[0] = 0;
+				_players[slot].figure = 0;
+				for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+					_players[slot].spells[i] = 0;
 
 				if(h -> name[0])
 					strncpy(_players[slot].name,(const char*)h -> name,NET_NAME_LEN - 1);
+
+				_players[slot].figure = h -> figure;
+				for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+					_players[slot].spells[i] = h -> spells[i];
 
 				_count ++;
 				}
 			else {
 				// Already seated: this is a retransmit, or a reconnect after a
-				// lost welcome. Resend rather than hand out a second slot.
+				// lost welcome. Resend rather than hand out a second slot. A
+				// fresh HELLO is also how a seated client updates its name and
+				// mechos from the lobby.
 				int slot = ep -> slot;
 
 				if(slot >= 0 && slot < _max_players){
 					_players[slot].is_present = 1;
 					_players[slot].peer_id = peer_id;
+					_players[slot].figure = h -> figure;
+					for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
+						_players[slot].spells[i] = h -> spells[i];
+
+					if(h -> name[0])
+						strncpy(_players[slot].name,(const char*)h -> name,NET_NAME_LEN - 1);
 					}
 				}
 
@@ -732,7 +932,8 @@ void netMatch::quant(void)
 		// the roster alone decides: two racers seated is a race. The clock runs
 		// from when the roster last changed, so joining at the last second
 		// restarts the countdown instead of starting on top of somebody.
-		if(_state == NET_MATCH_LOBBY){
+		// A menu lobby turns this off: there the host presses start.
+		if(_state == NET_MATCH_LOBBY && !_manual_start){
 			if(_count >= 2){
 				if(!_lobby_full_ms) _lobby_full_ms = now;
 				}
@@ -745,7 +946,9 @@ void netMatch::quant(void)
 
 		if(_state == NET_MATCH_STARTING){
 			// Either every remote slot has acknowledged or the wait ran out:
-			// a single silent peer must not hold the race hostage.
+			// a single silent peer must not hold the race hostage. The timeout
+			// is short by default and long in the menu lobby, where the
+			// acknowledgement only comes once a peer has a world loaded.
 			int remote = 0, acked = 0;
 
 			for(int i = 1; i < _max_players; i ++)
@@ -755,7 +958,7 @@ void netMatch::quant(void)
 					}
 
 			if(!remote || acked == remote ||
-			   (int)(now - _start_request_ms) >= NET_START_ACK_MS){
+			   (int)(now - _start_request_ms) >= _start_ack_timeout_ms){
 				unsigned int delay_ticks = (unsigned int)(NET_START_DELAY_MS / NET_TICK_MS);
 
 				begin_race(_sess -> tick() + delay_ticks);

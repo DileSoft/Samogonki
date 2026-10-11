@@ -1353,9 +1353,17 @@ static void net_game_handler(int type,const void* data,unsigned int len,void* pl
 	// heard of, and ignoring them is the whole of the compatibility story.
 }
 
-void mchNetStart(void)
+/*
+	Bring the session and the match layer up, once. Shared by mchNetStart - the
+	command line and the -netrace path, which opens at load time - and by the
+	menu lobby, which opens while the menu is still on screen. Idempotent: the
+	second caller finds the session already there.
+*/
+static int net_boot(int host)
 {
-	if(net_session_S) return;
+	netEndpoint* self;
+
+	if(net_session_S) return 1;
 
 	net_session_S = new netSession;
 	net_match_S = new netMatch(net_session_S);
@@ -1365,47 +1373,247 @@ void mchNetStart(void)
 	// on rather than read them and throw them away.
 	net_match_S -> set_handler(net_game_handler,NULL);
 
-	// Projectiles travel as their own message types and are tracked by entity
-	// id, which is per match. The registry is NOT reset here: it was cleared
-	// before the world was built (see GameQuantRTO::Init) so that the walking
-	// actors the host placed during the load are still in it and get
-	// replicated. Clearing it now would silently drop every one of them.
 	net_fx_set_session(net_session_S);
 	net_interp_reset();
 
-	// Zero asks for an ephemeral port, which is what a host wants: the
-	// client is told where to go, not the other way round.
-	if(!net_session_S -> open(mchNetHost ? mchNetPort : 0)){
+	// Zero asks for an ephemeral port, which is what a client wants; a host
+	// listens on the configured one.
+	if(!net_session_S -> open(host ? mchNetPort : 0)){
 		mchNetStatusText = "Failed to open socket";
-		net_log("open: FAILED");
-		return;
+
+		delete net_match_S;
+		delete net_session_S;
+		net_match_S = NULL;
+		net_session_S = NULL;
+		net_S = NULL;
+		net_fx_set_session(NULL);
+
+		return 0;
 		}
+
+	// A host listens on the port above; the client reaches 127.0.0.1 by
+	// default and whatever the menu holds. Nothing is sent yet.
+	self = net_session_S -> get_peer(0);
+	(void)self;
 
 	net_log_open();
-	net_log("net race start, %s",mchNetHost ? "host" : "client");
+	net_log("net race start, %s",host ? "host" : "client");
 
-	if(mchNetHost){
-		net_session_S -> host();
-		net_match_S -> open_host(mchNetMenuName[0] ? mchNetMenuName : "host",
-					 (unsigned char)mchCurrentWorld,
-					 (unsigned char)mchCurrentTrack,
-					 (unsigned char)mchNumLaps);
+	return 1;
+}
 
-		net_log("host on port %d, racers %d",mchNetPort,mchNumRacers);
+/* ------------------------------- menu lobby ------------------------------- */
+
+/*
+	The menu lobby. The session comes up while the creation screen is still
+	up, so players see each other join before the race loads, instead of
+	connecting after the flag drops.
+
+	The match layer's usual auto-start is off here: the host presses start.
+*/
+int mchNetLobbyHost(const char* host_name,const char* game_name,int figure,const int* spells)
+{
+	mchNetHost = 1;
+
+	if(!net_boot(1)) return 0;
+
+	net_session_S -> host();
+	net_match_S -> open_host(host_name && host_name[0] ? host_name : "host",
+				 (unsigned char)(mchCurrentWorld >= 0 ? mchCurrentWorld : NET_RACE_WORLD),
+				 (unsigned char)NET_RACE_TRACK,
+				 (unsigned char)(mchNumLaps > 0 ? mchNumLaps : 5));
+
+	net_match_S -> set_manual_start(1);
+
+	// Long enough to cover a world load on every client.
+	net_match_S -> set_start_ack_timeout(30000);
+
+	if(game_name) net_match_S -> set_game_name(game_name);
+	if(figure > 0) net_match_S -> set_local_player(host_name,figure,spells);
+
+	mchNetStatusText = "Waiting for racers";
+
+	return 1;
+}
+
+int mchNetLobbyJoin(const char* addr,const char* player_name,int figure,const int* spells)
+{
+	mchNetHost = 0;
+
+	if(!net_boot(0)) return 0;
+
+	if(addr && addr[0]){
+		strncpy(mchNetJoinAddr,addr,sizeof(mchNetJoinAddr) - 1);
+		mchNetJoinAddr[sizeof(mchNetJoinAddr) - 1] = 0;
 		}
-	else {
-		// The first attempt happens in mchNetQuant(), so a client that starts
-		// before the host comes up retries instead of failing outright.
-		net_last_connect_ms = 0;
 
-		net_log("client joining %s:%d",mchNetJoinAddr,mchNetPort);
+	if(player_name){
+		strncpy(mchNetMenuName,player_name,sizeof(mchNetMenuName) - 1);
+		mchNetMenuName[sizeof(mchNetMenuName) - 1] = 0;
 		}
+
+	net_match_S -> set_client_mechos(figure,spells);
+	net_match_S -> set_defer_ack(1);
+	net_match_S -> set_manual_start(1);
+
+	net_last_connect_ms = 0;
+	mchNetStatusText = "Connecting";
+
+	return 1;
+}
+
+// Pump the session while the menu is up. The menu calls this once a frame.
+void mchNetLobbyQuant(void)
+{
+	unsigned int now;
+
+	if(!net_session_S || !net_match_S) return;
+
+	now = (unsigned int)clocki();
+
+	// A client retries the connection until the welcome hands it a slot. The
+	// HELLO is reliable, so resending it on the retry is harmless and covers
+	// a lost one.
+	if(!mchNetHost && net_match_S -> local_slot() < 0 &&
+	   (int)(now - net_last_connect_ms) >= NET_CONNECT_RETRY_MS){
+		net_last_connect_ms = now;
+
+		if(net_session_S -> connect(mchNetJoinAddr,mchNetPort))
+			net_match_S -> open_client(mchNetMenuName[0] ? mchNetMenuName : "player");
+		}
+
+	net_session_S -> quant();
+	net_match_S -> quant();
+}
+
+void mchNetLobbyClose(void)
+{
+	if(!net_session_S) return;
+
+	mchNetFinit();
+}
+
+// Host pressed start: fix the world, then hand the match its prepare, which
+// tells every client to load. The race itself begins once each has loaded and
+// acknowledged.
+void mchNetLobbyHostStart(void)
+{
+	if(!net_match_S) return;
+
+	mchNetGame = 1;
+	mchNetHost = 1;
+
+	mchNetArmRaceWorld();
+
+	net_match_S -> set_world((unsigned char)mchCurrentWorld,
+				 (unsigned char)mchCurrentTrack,
+				 (unsigned char)(mchNumLaps > 0 ? mchNumLaps : 5));
+
+	mchSplitScreenGame = 0;
+	mchTurnBasedGame = 0;
+
+	net_match_S -> force_start();
+}
+
+// Client saw the host's prepare: adopt the world the host chose so both sides
+// load the same one, then leave the menu and load.
+void mchNetLobbyClientArm(void)
+{
+	if(!net_match_S) return;
+
+	mchNetGame = 1;
+	mchNetHost = 0;
+
+	mchCurrentWorld = net_match_S -> world_id();
+	mchCurrentTrack = net_match_S -> track_id();
+	mchNumLaps = net_match_S -> laps() > 0 ? net_match_S -> laps() : 5;
+
+	mchSplitScreenGame = 0;
+	mchTurnBasedGame = 0;
+}
+
+void mchNetLobbySetLocal(const char* name,int figure,const int* spells)
+{
+	if(net_match_S) net_match_S -> set_local_player(name,figure,spells);
+}
+
+void mchNetLobbySetGameName(const char* name)
+{
+	if(net_match_S && mchNetHost) net_match_S -> set_game_name(name);
+}
+
+const char* mchNetGameName(void)
+{
+	return net_match_S ? net_match_S -> game_name() : "";
+}
+
+int mchNetPlayerFigure(int slot)
+{
+	if(!net_match_S || slot < 0 || slot >= NET_MAX_PLAYERS) return 0;
+	if(!net_match_S -> player(slot).is_present) return 0;
+
+	return net_match_S -> player(slot).figure;
+}
+
+// The host has pressed start; the client should be leaving the menu to load.
+int mchNetLobbyStarted(void)
+{
+	if(!net_match_S) return 0;
+
+	return net_match_S -> state() == NET_MATCH_STARTING ||
+	       net_match_S -> state() == NET_MATCH_RUNNING;
+}
+
+void mchNetStart(void)
+{
+	int fresh = 0;
+
+	if(!net_session_S){
+		fresh = 1;
+
+		if(!net_boot(mchNetHost)) return;
+		}
+
+	net_S = net_session_S;
+	net_match_S -> set_handler(net_game_handler,NULL);
+	net_fx_set_session(net_session_S);
+	net_interp_reset();
+
+	if(fresh){
+		if(mchNetHost){
+			net_session_S -> host();
+			net_match_S -> open_host(mchNetMenuName[0] ? mchNetMenuName : "host",
+						 (unsigned char)mchCurrentWorld,
+						 (unsigned char)mchCurrentTrack,
+						 (unsigned char)(mchNumLaps > 0 ? mchNumLaps : 5));
+
+			net_log("host on port %d, racers %d",mchNetPort,mchNumRacers);
+			}
+		else {
+			// The first attempt happens in mchNetQuant(), so a client that
+			// starts before the host comes up retries instead of failing.
+			net_last_connect_ms = 0;
+
+			net_log("client joining %s:%d",mchNetJoinAddr,mchNetPort);
+			}
+		}
+
+	// The menu lobby opened the session and the match already. A client that
+	// got here has its world loaded, which is exactly what its deferred start
+	// acknowledgement was waiting for.
+	if(!mchNetHost && net_match_S -> state() == NET_MATCH_STARTING)
+		net_match_S -> notify_loaded();
 
 	mchNetStatusText = mchNetHost ? "Waiting for racers" : "Connecting";
 }
 
 void mchNetFinit(void)
 {
+	// Say goodbye before the socket goes: a client's slot frees on the host
+	// the moment this lands, instead of when the peer times out. A no-op on
+	// the host and when the client is not connected.
+	if(net_match_S) net_match_S -> leave();
+
 	if(net_session_S) net_session_S -> close();
 
 	delete net_match_S;
@@ -1664,7 +1872,8 @@ void mchNetQuant(void)
 
 	/* ------------------------- bring the session up ---------------------- */
 
-	if(!mchNetHost && !net_client_ready){
+	if(!mchNetHost && !net_client_ready &&
+	   (net_match_S -> state() == NET_MATCH_NONE || net_match_S -> state() == NET_MATCH_LOBBY)){
 		if((int)(now - net_last_connect_ms) >= NET_CONNECT_RETRY_MS){
 			net_last_connect_ms = now;
 

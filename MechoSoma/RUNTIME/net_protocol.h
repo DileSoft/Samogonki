@@ -65,9 +65,12 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // carries the place its effect sits; version 6 widened netSpawn::model_id from
 // 16 to 32 bits, because the mesh id is M3D_TOTAL_TYPE and the kind lives in
 // its high half - as 16 bits the kind was lost and the client could not find
-// the mesh to build. A peer of another version is refused in the handshake
-// rather than read with the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 9;
+// the mesh to build. Version 10 added the lobby: netHello and netRosterEntry
+// carry the player's mechos (figure plus three spell part ids), and
+// netRosterHeader carries the host's game name, so everybody sees who has
+// joined and what they are driving before the race loads. A peer of another
+// version is refused in the handshake rather than read with the wrong layout.
+const unsigned int NET_PROTO_VERSION	= 10;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -165,6 +168,13 @@ struct netHello
 	unsigned char name[NET_NAME_LEN];
 	unsigned char client_build;
 	unsigned char input_rate_hz;
+
+	// The mechos the player brings into the lobby: figure id (1..N, 0 unset)
+	// and one arcane part id per spell slot. Everyone's copy of the roster
+	// carries these back out, which is what lets the lobby show who is driving
+	// what before the race loads.
+	unsigned char figure;
+	unsigned char spells[NET_LOBBY_SPELLS];
 };
 
 // NET_MSG_READY
@@ -204,6 +214,10 @@ struct netRosterHeader
 	unsigned char flags;
 	unsigned char ping[NET_MAX_PLAYERS];
 	unsigned int server_tick;
+
+	// The host's game name, sent with every roster so a renaming in the lobby
+	// reaches everybody without a message of its own.
+	unsigned char game_name[NET_SERVER_NAME_LEN];
 };
 
 struct netRosterEntry
@@ -212,6 +226,8 @@ struct netRosterEntry
 	unsigned char state;		// netRosterStates
 	unsigned char racer_id;
 	unsigned char kind;		// M3D_KIND of the mecha, 6 bits used
+	unsigned char figure;		// mechos figure, 1..N, 0 unset
+	unsigned char spells[NET_LOBBY_SPELLS];	// arcane part id per slot
 	unsigned char name[NET_NAME_LEN];
 };
 

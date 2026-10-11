@@ -1232,6 +1232,305 @@ static int net_test_event(FILE* f)
 	return ok;
 }
 
+/*
+	Menu lobby test.
+
+	The one path the roster test does not cover: the lobby the creation screen
+	runs. It differs from the plain lobby in two ways that matter, and both are
+	what this pins down:
+
+	  - the host starts by hand, not on a two-raced countdown;
+	  - a client holds its start acknowledgement until its world has loaded, so
+	    the host cannot begin while the client is still loading.
+
+	It also checks that the game name and each player's mechos survive the
+	roster, since the lobby is where they are shown.
+*/
+static int net_test_menu_lobby(FILE* f)
+{
+	const int NUM = 2;
+	const int max_ms = 10000;
+
+	const int PHASE_SEAT = 0;
+	const int PHASE_GO = 1;
+	const int PHASE_WAIT_ACK = 2;
+	const int PHASE_RUN = 3;
+
+	netSession* host = new netSession;
+	netMatch*   hmatch = new netMatch(host);
+
+	netSession* cl[2];
+	netMatch*   cm[2];
+
+	int ok = 1;
+	int phase = PHASE_SEAT;
+	unsigned int phase_ms = 0;
+	unsigned int t0 = clocki();
+	unsigned short host_port = 0;
+	unsigned int common_tick = 0;
+	int i;
+
+	for(i = 0; i < 2; i ++){ cl[i] = NULL; cm[i] = NULL; }
+
+	if(!host -> open(0)){
+		net_logf(f,"FAIL menulobby: host -> open: %s",host -> status());
+		ok = 0;
+		}
+	else {
+		netEndpoint* self = host -> get_peer(0);
+
+		host -> host();
+		hmatch -> open_host("hosty",1,0,5);
+		hmatch -> set_manual_start(1);
+		hmatch -> set_start_ack_timeout(8000);
+		hmatch -> set_game_name("Arctic Cup");
+		{
+			int sp[3] = { 2,3,4 };
+			hmatch -> set_local_player("hosty",3,sp);
+		}
+
+		if(self && self -> hasAddr) host_port = self -> addr.port;
+		else ok = 0;
+		}
+
+	if(ok){
+		for(i = 0; i < NUM; i ++){
+			cl[i] = new netSession;
+
+			if(!cl[i] -> open(0) || !cl[i] -> connect("127.0.0.1",host_port)){
+				net_logf(f,"FAIL menulobby: client %d -> open/connect",i);
+				ok = 0;
+				break;
+				}
+
+			cm[i] = new netMatch(cl[i]);
+			{
+				int sp[3] = { 5,6,7 };
+				cm[i] -> set_client_mechos(4 + i,sp);
+			}
+			cm[i] -> set_defer_ack(1);
+			cm[i] -> set_manual_start(1);
+			cm[i] -> open_client(i ? "beta" : "alpha");
+			}
+		}
+
+	if(ok){
+		while(clocki() - t0 < (unsigned int)max_ms && phase != PHASE_RUN){
+			unsigned int now = clocki();
+
+			if(phase_ms == 0) phase_ms = now;
+
+			host -> quant();
+			hmatch -> quant();
+
+			for(i = 0; i < NUM; i ++)
+				if(cl[i]){ cl[i] -> quant(); cm[i] -> quant(); }
+
+			if(phase == PHASE_SEAT){
+				if(hmatch -> num_players() == NUM + 1){
+					if(strcmp(hmatch -> game_name(),"Arctic Cup")){
+						net_logf(f,"FAIL menulobby: game name \"%s\"",hmatch -> game_name());
+						ok = 0;
+						}
+					if(hmatch -> player(0).figure != 3){
+						net_logf(f,"FAIL menulobby: host figure %d",hmatch -> player(0).figure);
+						ok = 0;
+						}
+					if(strcmp(hmatch -> player(1).name,"alpha") ||
+					   strcmp(hmatch -> player(2).name,"beta")){
+						net_logf(f,"FAIL menulobby: names %s/%s",
+							hmatch -> player(1).name,hmatch -> player(2).name);
+						ok = 0;
+						}
+					if(hmatch -> player(1).figure != 4 || hmatch -> player(2).figure != 5){
+						net_logf(f,"FAIL menulobby: client figures %d/%d",
+							hmatch -> player(1).figure,hmatch -> player(2).figure);
+						ok = 0;
+						}
+
+					net_logf(f,"menulobby: seated, game \"%s\"",hmatch -> game_name());
+					phase = PHASE_GO;
+					phase_ms = 0;
+					}
+				else if(now - phase_ms > 4000){
+					net_logf(f,"FAIL menulobby: not seated in time");
+					ok = 0;
+					phase = PHASE_RUN;
+					}
+				}
+
+			if(phase == PHASE_GO && now - phase_ms > 200){
+				hmatch -> force_start();
+				phase = PHASE_WAIT_ACK;
+				phase_ms = now;
+				}
+
+			if(phase == PHASE_WAIT_ACK && now - phase_ms > 300){
+				// The host must still be waiting: the clients deferred their
+				// acknowledgement until loaded, and have not loaded yet.
+				if(hmatch -> state() == NET_MATCH_RUNNING){
+					net_logf(f,"FAIL menulobby: host began before the clients loaded");
+					ok = 0;
+					}
+
+				for(i = 0; i < NUM; i ++)
+					if(cm[i] -> state() != NET_MATCH_STARTING){
+						net_logf(f,"FAIL menulobby: client %d state %d, expected STARTING",
+							i,cm[i] -> state());
+						ok = 0;
+						}
+
+				// "Loaded now".
+				for(i = 0; i < NUM; i ++)
+					cm[i] -> notify_loaded();
+
+				phase = PHASE_RUN;
+				phase_ms = now;
+				}
+
+			netSleep(1);
+			}
+
+		if(ok){
+			// Let the acks land and the host commit a tick.
+			unsigned int t1 = clocki();
+
+			while(clocki() - t1 < 3000 && hmatch -> state() != NET_MATCH_RUNNING){
+				host -> quant();
+				hmatch -> quant();
+				for(i = 0; i < NUM; i ++){ cl[i] -> quant(); cm[i] -> quant(); }
+				netSleep(1);
+				}
+
+			if(hmatch -> state() != NET_MATCH_RUNNING){
+				net_logf(f,"FAIL menulobby: host never began after acks");
+				ok = 0;
+				}
+			else {
+				common_tick = hmatch -> start_tick();
+
+				for(i = 0; i < NUM; i ++){
+					if(cm[i] -> state() != NET_MATCH_RUNNING){
+						net_logf(f,"FAIL menulobby: client %d state %d after start",
+							i,cm[i] -> state());
+						ok = 0;
+						}
+					if(cm[i] -> start_tick() != common_tick){
+						net_logf(f,"FAIL menulobby: client %d tick %u, host %u",
+							i,cm[i] -> start_tick(),common_tick);
+						ok = 0;
+						}
+					// The client's copy of the roster carries the game name
+					// and the host's mechos too.
+					if(strcmp(cm[i] -> game_name(),"Arctic Cup")){
+						net_logf(f,"FAIL menulobby: client %d game name \"%s\"",
+							i,cm[i] -> game_name());
+						ok = 0;
+						}
+					if(cm[i] -> player(0).figure != 3){
+						net_logf(f,"FAIL menulobby: client %d host figure %d",
+							i,cm[i] -> player(0).figure);
+						ok = 0;
+						}
+					}
+
+				if(ok) net_logf(f,"menulobby: deferred ack held the start, tick %u shared",common_tick);
+				}
+			}
+		}
+
+	for(i = 0; i < NUM; i ++){
+		if(cl[i]){ cl[i] -> close(); delete cl[i]; }
+		if(cm[i]) delete cm[i];
+		}
+
+	if(host) host -> close();
+
+	delete host;
+	delete hmatch;
+
+	return ok;
+}
+
+/*
+	Leaving the lobby. A client that walks out has to free its slot at once,
+	not when the transport times the peer out - otherwise a host that is
+	waiting for a friend keeps seeing a ghost. The client sends LEAVE and the
+	host drops the slot on the spot.
+*/
+static int net_test_leave(FILE* f)
+{
+	netSession* host = new netSession;
+	netMatch*   hmatch = new netMatch(host);
+	netSession* client = new netSession;
+	netMatch*   cmatch = new netMatch(client);
+
+	int ok = 1;
+	unsigned int t0;
+	unsigned short host_port = 0;
+	int seated = 0,t1;
+
+	if(!host -> open(0)){ ok = 0; }
+	else {
+		netEndpoint* self = host -> get_peer(0);
+
+		host -> host();
+		hmatch -> open_host("hosty",1,0,5);
+		hmatch -> set_manual_start(1);
+
+		if(self && self -> hasAddr) host_port = self -> addr.port;
+		else ok = 0;
+		}
+
+	if(ok){
+		client -> open(0);
+		client -> connect("127.0.0.1",host_port);
+		cmatch -> open_client("guest");
+		}
+
+	if(ok){
+		t0 = clocki();
+		while(clocki() - t0 < 4000 && !seated){
+			host -> quant(); hmatch -> quant();
+			client -> quant(); cmatch -> quant();
+			if(hmatch -> num_players() == 2) seated = 1;
+			netSleep(1);
+			}
+
+		if(!seated){
+			net_logf(f,"FAIL leave: guest never seated");
+			ok = 0;
+			}
+		}
+
+	if(ok){
+		// Walk out. The host must drop the slot without the transport timing
+		// the peer out, which is tens of seconds away.
+		cmatch -> leave();
+
+		t1 = 0; t0 = clocki();
+		while(clocki() - t0 < 3000 && !t1){
+			host -> quant(); hmatch -> quant();
+			client -> quant(); cmatch -> quant();
+			if(hmatch -> num_players() == 1) t1 = 1;
+			netSleep(1);
+			}
+
+		if(!t1){
+			net_logf(f,"FAIL leave: slot not freed, %d players",hmatch -> num_players());
+			ok = 0;
+			}
+		else net_logf(f,"leave: slot freed on LEAVE");
+		}
+
+	client -> close();
+	host -> close();
+	delete client; delete cmatch;
+	delete host; delete hmatch;
+
+	return ok;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -1254,6 +1553,8 @@ int net_selftest(void)
 	int got_fragment = 0;
 	int got_input = 0;
 	int got_lobby = 0;
+	int got_menulobby = 0;
+	int got_leave = 0;
 	int got_snapshot = 0;
 	int got_spawn = 0;
 	int got_actor = 0;
@@ -1282,6 +1583,14 @@ int net_selftest(void)
 	got_lobby = net_test_lobby(f);
 	if(!got_lobby)
 		net_logf(f,"FAIL net_test_lobby");
+
+	got_menulobby = net_test_menu_lobby(f);
+	if(!got_menulobby)
+		net_logf(f,"FAIL net_test_menu_lobby");
+
+	got_leave = net_test_leave(f);
+	if(!got_leave)
+		net_logf(f,"FAIL net_test_leave");
 
 	got_snapshot = net_test_snapshot(f);
 	if(!got_snapshot)
@@ -1449,12 +1758,12 @@ int net_selftest(void)
 	if(!got_event)
 		net_logf(f,"FAIL net_test_event");
 
-	ok = (got_welcome && got_fragment && got_input && got_lobby && got_snapshot && got_spawn && got_actor && got_event && host_reliable == 1 &&
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_menulobby && got_leave && got_snapshot && got_spawn && got_actor && got_event && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d snapshot=%d spawn=%d actor=%d event=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_snapshot,got_spawn,got_actor,got_event);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d menulobby=%d leave=%d snapshot=%d spawn=%d actor=%d event=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_menulobby,got_leave,got_snapshot,got_spawn,got_actor,got_event);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

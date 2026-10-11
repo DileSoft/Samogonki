@@ -210,6 +210,7 @@ void acsInitOnlineMenu(void);
 void acsInitNetMenu(void);
 int acsNetMenuKey(int key);
 int acsNetMenuExtEvent(int row,int dir);
+void acsNetMenuQuant(void);
 
 void acsInitShop(int pl);
 void acsFinitShop(int mode = 0);
@@ -1480,12 +1481,17 @@ int acsQuant(void)
 			rows themselves fire through ACS_EXT_NET_MENU and
 			acsHandleExtEvent, like every other menu item.
 		*/
-		if(acsScrD -> curScr && acsScrD -> curScr -> ID == ACS_MULTIPLAYER_SCR &&
+		if(acsScrD -> curScr && acsScrD -> curScr -> ID == ACS_NET_GAME_SCR &&
 		   acsNetMenuKey(k))
 			continue;
 
 		acsScrD -> KeyTrap(k);
 	}
+
+	// The network lobby, once a frame while its screen is up: it pumps the
+	// session and pulls the roster into the list. See ACS_NET.CPP.
+	if(acsScrD -> curScr && acsScrD -> curScr -> ID == ACS_NET_GAME_SCR)
+		acsNetMenuQuant();
 
 	ret = acsScrD -> Quant();
 	acsScrD -> RedrawQuant();
