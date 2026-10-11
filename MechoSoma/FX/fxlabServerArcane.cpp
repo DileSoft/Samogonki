@@ -91,6 +91,25 @@ static void fxlabClientArcaneSoundLong(const Vect3f& p,int sound)
 	t->Start();
 }
 
+/*
+	Make one of the arcane's own client objects and tag it with the arcane that
+	owns it, so a stop can find it again.
+
+	Only the objects built directly here are tagged. A child that one of them
+	makes in its own Start() - a claw's spline, a link's trail - is left alone:
+	it belongs to its owner, and killing it out from under the owner would
+	leave the owner holding a freed pointer the next time it draws.
+*/
+static fxlabGeneralObjectType* fxlabClientArcaneNew(int type,int owner_id,int arcane_id)
+{
+	fxlabGeneralObjectType* t = fxlabClientD->CreateObject(type);
+
+	t -> NetArcaneOwner = owner_id;
+	t -> NetArcaneID = arcane_id;
+
+	return t;
+}
+
 void fxlabClientArcaneStart(int arcane_id,int owner_id)
 {
 	mchRacer* n;
@@ -110,11 +129,6 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 	}
 
 	if(!owner) return;
-
-	// Every client object built from here to the clear at the bottom is tagged
-	// with this arcane, so the stop event can find and kill it later. See
-	// fxlabClientArcaneStop.
-	fxlabClientSetArcaneScope(owner_id,arcane_id);
 
 	/*
 		Feature arcanes. Their whole visual is the car itself - wings, a
@@ -260,7 +274,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		//RevoltSpace
 		case ARCANE014:
 			Position = owner->R();
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_REVOLT_SPACE_LINK);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_REVOLT_SPACE_LINK,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_REVOLT_SPACE_LINK);
 			t->SetPosition(Position);
@@ -303,7 +317,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			Position = owner->R();
 			Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),Position.z + owner->radius());
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_CONTROL_OMNI);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_CONTROL_OMNI,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_ELECTRIC_STORM_MARKER_OMNI);
 			t->SetPosition(Position);
@@ -311,7 +325,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 
 			Position.z += 150.0f;
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_TWISTER);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_TWISTER,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_STORM_CLOUDS);
 			t->SetPosition(Position);
@@ -323,7 +337,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		//BowMachine
 		case ARCANE032:
 			Position = owner->part_coords(M3D_FRONT);
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_BOW_MACHINE_FRONT_LINK);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_BOW_MACHINE_FRONT_LINK,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_BOW_MACHINE);
 			t->SetPosition(Position);
@@ -334,7 +348,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		//ShaftMachine
 		case ARCANE033:
 			Position = owner->part_coords(M3D_FRONT);
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SHAFT_MECHINE_FRONT_LINK);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_SHAFT_MECHINE_FRONT_LINK,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_SHAFT_MACHINE_LINK);
 			t->SetPosition(Position);
@@ -364,7 +378,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		//PlasmaClaw
 		case ARCANE036:
 			Position = owner->part_coords(M3D_FRONT);
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_WILD_CLAW_FRONT_LINK);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_WILD_CLAW_FRONT_LINK,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_WILD_CLAW);
 			t->SetPosition(Position);
@@ -405,14 +419,14 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		case ARCANE045:
 			Position = owner->R();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_LEFT_BALL_WIND_LINK);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_LEFT_BALL_WIND_LINK,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_BALL_WIND_LEFT_LINK);
 			t->SetPosition(Position);
 			t->SetBody(owner);
 			t->Start();
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_RIGHT_BALL_WIND_LINK);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_RIGHT_BALL_WIND_LINK,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_BALL_WIND_RIGHT_LINK);
 			t->SetPosition(Position);
@@ -496,8 +510,6 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 		default:
 			break;
 	}
-
-	fxlabClientSetArcaneScope(-1,-1);
 }
 
 /*

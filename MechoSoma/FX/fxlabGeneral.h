@@ -229,13 +229,6 @@ struct fxlabClientObjectDispatcher : fxlabGeneralObjectDispatcher
 extern fxlabClientObjectDispatcher* fxlabClientD;
 extern fxlabServerObjectDispatcher* fxlabServerD;
 
-/*
-	Tags every client object created until the next call, so that the arcane
-	mirror can be stopped later by (owner, arcane). Passing -1,-1 ends the
-	scope. Client only; see fxlabClientArcaneStart.
-*/
-void fxlabClientSetArcaneScope(int owner_id,int arcane_id);
-
 extern float fxlabServerQuantPeriod;
 extern float fxlabGlobalTimeRate;
 extern float fxlabServerTimeRate;

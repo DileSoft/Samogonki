@@ -840,8 +840,10 @@ void fxlabClientWildClaw::Quant()
 			SoundPoint.Process->SetAlive(0);
 	};
 
-	SplinePoint.Process->SetPosition(Position);
-	SplinePoint.Process->SetConversion(Alpha);
+	if(SplinePoint.Process){
+		SplinePoint.Process->SetPosition(Position);
+		SplinePoint.Process->SetConversion(Alpha);
+		}
 
 	CalcCenter();
 
