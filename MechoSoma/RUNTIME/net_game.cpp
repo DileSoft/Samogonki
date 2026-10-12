@@ -669,6 +669,10 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			// the car would stall for a frame every snapshot.
 			mr -> setPositionExact(net_local_auth,net_local_auth_yaw);
 			mr -> setGlobalVelocity(net_local_auth_vel);
+			// The same reset clears speed_avr, and the EMA that rebuilds it
+			// (0.06/frame) never catches up between 25 ms snapshots - the
+			// bonus pickup gate reads it, so the local car could not collect.
+			mr -> setAverageSpeed(net_local_auth_vel.norm());
 
 			// The teleport trap freezes its victim in place (and hides it)
 			// while it charges, then drops it on the target. Without this the

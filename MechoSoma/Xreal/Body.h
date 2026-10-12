@@ -267,6 +267,9 @@ public:
 
 	// Global velocity
 	float averageSpeed() const { return speed_avr; } // усредненная норма скорости
+	// Restores the average cleared by setPositionExact; it only rebuilds as a
+	// slow EMA in post_quant, which a frequent re-pose keeps near zero.
+	void setAverageSpeed(float speed) { speed_avr = speed; }
 
 	// Верхняя высота по полигональной карте
 	float H() const;
