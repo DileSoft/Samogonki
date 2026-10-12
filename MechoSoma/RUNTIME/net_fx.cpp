@@ -1004,12 +1004,17 @@ void net_fx_trace(FILE* f,unsigned int tick)
 		const Vect3f& p = b -> R();
 		const Vect3f& v = b -> Vglobal();
 
+		// model is the mesh the host resolved (the one number the client
+		// cannot derive); alive guards the count comparison against a body
+		// the engine has killed but not yet dropped from its list.
 		fprintf(f,
 			"%u,E,%u,%u,%u,%.4f,%.4f,%.4f,%.6f,%.4f,%.4f,%.4f,%.2f,"
-			"0,0,0,0,0,0,0,0,0,0,0,0,0,0\n",
+			"0,0,0,0,0,0,0,0,0,0,0,0,0,0,%u,%d\n",
 			tick,(unsigned)e -> entity_id,(unsigned)e -> type,
 			(unsigned)e -> variant,
-			p.x,p.y,p.z,b -> psi(),v.x,v.y,v.z,v.norm());
+			p.x,p.y,p.z,b -> psi(),v.x,v.y,v.z,v.norm(),
+			(unsigned)(b -> geometry ? b -> geometry -> Type : 0),
+			b -> alive() ? 1 : 0);
 	}
 }
 

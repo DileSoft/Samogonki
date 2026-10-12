@@ -115,7 +115,7 @@ static void net_trace_open(void)
 	if(net_trace_file)
 		fprintf(net_trace_file,
 			"tick,kind,key,type,variant,px,py,pz,yaw,vx,vy,vz,speed,energy,"
-			"flags,lap,cp,place,nstar,mech,feat,pw0,pw1,pw2,st0,st1,st2\n");
+			"flags,lap,cp,place,nstar,mech,feat,pw0,pw1,pw2,st0,st1,st2,model,alive\n");
 }
 
 static void net_trace_close(void)
@@ -134,9 +134,11 @@ static void net_trace_racer_line(unsigned int tick,char kind,int key,int type,
 {
 	if(!net_trace_file) return;
 
+	// model and alive are entity-only; a racer has no replicated mesh id, so
+	// they are written as 0 and 1 and never compare in the E section.
 	fprintf(net_trace_file,
 		"%u,%c,%d,%d,0,%.4f,%.4f,%.4f,%.6f,%.4f,%.4f,%.4f,%.2f,%u,"
-		"%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+		"%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,0,1\n",
 		tick,kind,key,type,px,py,pz,yaw,vx,vy,vz,speed,energy,flags,lap,cp,
 		place,nstar,mech,feat,pw0,pw1,pw2,st0,st1,st2);
 }

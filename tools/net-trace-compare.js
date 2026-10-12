@@ -3,7 +3,7 @@
 	Compare two -netdump traces: a host one and a client one.
 
 	Both write one CSV row per networked object per host tick. This lines the
-	two up on (tick, kind, key) and reports where they disagree:
+	two up on (tick, kind, key) and reports:
 
 	  R  racer as it travels on the wire. Host packed it, client unpacked it.
 	     Matched rows must be byte-identical; the only thing this can show is
@@ -12,10 +12,32 @@
 	     interpolated a fixed delay behind the host and its own car is
 	     simulated locally, so this is compared at the lag that fits best,
 	     and the residual after that lag is the real drift.
-	  E  replicated bodies (projectiles, actors), host world vs client world.
-	     Class B is simulated independently on each machine; class C is
-	     state-replicated. Entity ids line the two up. The lag fit separates
-	     a constant spawn-latency offset from genuine drift.
+	  E  replicated bodies (projectiles, actors, walking bonuses), host world
+	     vs client world. Grouped by type and variant, so BonusMan1..4 are
+	     separate. Reports three things the user cares about separately:
+	       - count:   does the client hold the same number of objects per tick?
+	       - props:   do type/variant/model/alive agree for the same id?
+	       - pose:    how far apart are matched copies (lag-fitted residual)?
+
+	     Covered: every type net_fx.cpp registers.
+	       class B: cannon_bomb, volcanic_bomb, fire_bolide, snow_ball,
+	         sleepy_mortar, minor_bonus, major_bonus, titanium_ball, and the
+	         factory-built smart bodies (smart_fireball, smart_lightningbolt,
+	         suicide, clown, evil_eye, tomato, crystal, bubble, little_spider);
+	       class C: bonus_man#1..#4 (the walking bonuses), butterfly,
+	         wicked_butterfly, caterpillar, worm, dragon, frog, shark, fish.
+
+	     Not covered, and why:
+	       - racer bodies: the R/W sections;
+	       - mechos parts and wheels: identical from the same mechos config,
+	         only their arcane power/status travels, already in R;
+	       - static track scenery (bonus boxes, gears, stones) and debris:
+	         built on both machines from the same track load, never sent;
+	       - class D cosmetics (dust, trails, particles) and sound: local,
+	         drawn from the shared fxlabClientRND stream;
+	       - areas (trap_sphere, red_track, slime_circle, damage_sensor):
+	         declared in netEntityTypes but not registered by net_fx, so
+	         nothing replicates them yet.
 
 	Usage:
 	  node tools/net-trace-compare.js <host.csv> <client.csv> [localSlot]
@@ -29,7 +51,7 @@ const fs = require('fs');
 
 const COLS = ['tick','kind','key','type','variant','px','py','pz','yaw','vx','vy','vz',
 	'speed','energy','flags','lap','cp','place','nstar','mech','feat',
-	'pw0','pw1','pw2','st0','st1','st2'];
+	'pw0','pw1','pw2','st0','st1','st2','model','alive'];
 
 const ENT_NAMES = {
 	1:'cannon_bomb',2:'volcanic_bomb',3:'fire_bolide',4:'snow_ball',5:'sleepy_mortar',
@@ -43,6 +65,12 @@ const ENT_NAMES = {
 // Entity types below BONUS_MAN are class B (independently simulated), above
 // are class C (state-replicated).
 const entIsActor = t => t >= 19 && t <= 32;
+// Walking bonuses are the four BonusMan subclasses, one enum value, split by
+// variant. This is the label the report shows for them.
+function entLabel(type, variant) {
+	const base = ENT_NAMES[type] || ('type' + type);
+	return variant ? base + '#' + variant : base;
+}
 
 const LAG_MAX = 8;
 
@@ -68,6 +96,7 @@ function load(path) {
 			mech: +f[idx.mech], feat: +f[idx.feat],
 			pw: [+f[idx.pw0], +f[idx.pw1], +f[idx.pw2]],
 			st: [+f[idx.st0], +f[idx.st1], +f[idx.st2]],
+			model: +f[idx.model], alive: +f[idx.alive],
 		});
 	}
 	return rows;
@@ -96,10 +125,7 @@ function stats(vals) {
 }
 const f = (v, w = 7) => (Number.isFinite(v) ? v.toFixed(2) : '  n/a ').padStart(w);
 
-// The lag that makes a client series line up with the host series best. The
-// client sample at tick T is compared against the host sample at T + lag, and
-// the lag with the smallest mean distance wins. Constant replication latency
-// shows up as a nonzero lag; drift shows up as the residual at that lag.
+// The lag that makes a client series line up with the host series best.
 function bestLag(clientRows, hostMap) {
 	let best = { lag: 0, mean: Infinity };
 	for (let lag = -LAG_MAX; lag <= LAG_MAX; lag++) {
@@ -157,7 +183,7 @@ function main() {
 		}
 		console.log('\n== R: racer on the wire ==');
 		console.log('  host ticks ' + hTicks.size + ', client ticks ' + cTicks.size +
-			', ticks the client has and the host does not: ' + extraTicks);
+			', client ticks absent on host: ' + extraTicks);
 		console.log('  snapshot ticks sent by host but absent on client: ' + lostTicks +
 			' (' + (100 * lostTicks / Math.max(1, hTicks.size)).toFixed(1) + '% loss)');
 		console.log('  received rows also sent by host: ' + matched +
@@ -176,8 +202,6 @@ function main() {
 		const slots = [...new Set(cW.map(r => r.key))].sort((a, b) => a - b);
 		for (const slot of slots) {
 			const rows = cW.filter(r => r.key === slot);
-			// bestLag looks up '(tick+lag)|key'; give it a host map keyed the
-			// same way, holding the authoritative racer row for this slot.
 			const hSlot = new Map();
 			for (const h of hR) if (h.key === slot) hSlot.set(h.tick + '|' + slot, h);
 			const best = bestLag(rows, hSlot);
@@ -209,35 +233,80 @@ function main() {
 		const hMap = new Map(hE.map(r => [keyOf(r), r]));
 		const cMap = new Map(cE.map(r => [keyOf(r), r]));
 
-		// First host tick each entity was seen, for age (time since spawn).
-		const firstSeen = new Map();
-		for (const r of hE) if (!firstSeen.has(r.key)) firstSeen.set(r.key, r.tick);
+		// Group label. Walking bonuses carry a variant and show as bonus_man#N.
+		const label = r => entLabel(r.type, r.variant);
 
-		let hostOnly = 0, clientOnly = 0, matched0 = 0;
-		for (const [k, hr] of hMap) { if (cMap.has(k)) matched0++; else hostOnly++; }
+		// Property agreement for the same (tick, id): does the client's idea of
+		// what the object is match the host's?
+		const propBad = { type: 0, variant: 0, model: 0, alive: 0 };
+		let propMatched = 0, hostOnly = 0, clientOnly = 0;
+		for (const [k, hr] of hMap) {
+			const cr = cMap.get(k);
+			if (!cr) { hostOnly++; continue; }
+			propMatched++;
+			if (hr.type !== cr.type) propBad.type++;
+			if (hr.variant !== cr.variant) propBad.variant++;
+			if (hr.model !== cr.model) propBad.model++;
+			if (hr.alive !== cr.alive) propBad.alive++;
+		}
 		for (const [k] of cMap) if (!hMap.has(k)) clientOnly++;
-
-		const cType = new Map();
-		for (const r of cE) { if (!cType.has(r.type)) cType.set(r.type, []); cType.get(r.type).push(r); }
 
 		console.log('\n== E: replicated bodies, host world vs client world ==');
 		console.log('  host rows ' + hE.length + ', client rows ' + cE.length +
-			', matched at same tick ' + matched0);
+			', same (tick,id) ' + propMatched);
 		console.log('  present on host only ' + hostOnly + ', on client only ' + clientOnly +
 			' (spawn/despawn timing skew)');
+		console.log('  property mismatch on same (tick,id): type ' + propBad.type +
+			', variant ' + propBad.variant + ', model ' + propBad.model +
+			', alive ' + propBad.alive);
 
+		// Per-tick object count per label, both sides.
+		const hCount = new Map(), cCount = new Map();
+		function bump(map, r) {
+			const g = label(r);
+			if (!map.has(g)) map.set(g, new Map());
+			const t = map.get(g);
+			t.set(r.tick, (t.get(r.tick) || 0) + 1);
+		}
+		for (const r of hE) bump(hCount, r);
+		for (const r of cE) bump(cCount, r);
+
+		// A tick the client never received has no client trace at all, so its
+		// object count is unknowable, not zero. Counts are compared only on
+		// ticks present in the client's own R trace; the rest are counted as
+		// skipped so packet loss cannot be mistaken for a missing object.
+		const recvTicks = new Set(cR.map(r => r.tick));
+
+		const groups = new Set([...hCount.keys(), ...cCount.keys()]);
 		const report = [];
-		for (const [t, rows] of cType) {
-			const best = bestLag(rows, hMap);
-			const d2 = [], d3 = [], dyaw = [], dv = [];
+		for (const g of groups) {
+			const ht = hCount.get(g) || new Map();
+			const ct = cCount.get(g) || new Map();
+			const ticks = new Set([...ht.keys(), ...ct.keys()]);
+			let diffTicks = 0, maxDiff = 0, sumDiff = 0, hTotal = 0, cTotal = 0, skipped = 0, cmp = 0;
+			for (const t of ticks) {
+				if (!recvTicks.has(t)) { skipped++; continue; }
+				cmp++;
+				const a = ht.get(t) || 0, b = ct.get(t) || 0;
+				hTotal += a; cTotal += b;
+				const d = Math.abs(a - b);
+				if (d) diffTicks++;
+				if (d > maxDiff) maxDiff = d;
+				sumDiff += d;
+			}
+			// Pose residual for this label, at the label's best lag.
+			const rows = cE.filter(r => label(r) === g);
+			const hKey = new Map(hE.filter(r => label(r) === g).map(r => [(r.tick) + '|' + r.key, r]));
+			const best = bestLag(rows, hKey);
+			const d2 = [], d3 = [], dyaw = [], dv = [], ages = [];
 			const big = [0, 0, 0];
-			const ages = [];
+			const firstSeen = new Map();
+			for (const r of hE) if (label(r) === g && !firstSeen.has(r.key)) firstSeen.set(r.key, r.tick);
 			for (const cr of rows) {
-				const h = hMap.get((cr.tick + best.lag) + '|' + cr.key);
+				const h = hKey.get((cr.tick + best.lag) + '|' + cr.key);
 				if (!h) continue;
 				const e = dist2(h, cr);
-				d2.push(e);
-				d3.push(dist3(h, cr));
+				d2.push(e); d3.push(dist3(h, cr));
 				dyaw.push(angdiff(h.yaw, cr.yaw));
 				dv.push(Math.hypot(h.vx - cr.vx, h.vy - cr.vy, h.vz - cr.vz));
 				if (e > 50) big[0]++;
@@ -245,35 +314,46 @@ function main() {
 				if (e > 1024) big[2]++;
 				ages.push({ age: h.tick - (firstSeen.get(h.key) || h.tick), d2: e });
 			}
-			const lag0 = [];
-			for (const cr of rows) {
-				const h = hMap.get(cr.tick + '|' + cr.key);
-				if (h) lag0.push(dist2(h, cr));
-			}
-			report.push({ t, best, s2: stats(d2), s3: stats(d3), sy: stats(dyaw), sv: stats(dv), big, ages,
-				lag0: stats(lag0) });
+			report.push({
+				g, ticks: ticks.size, cmp, skipped, diffTicks, maxDiff,
+				meanDiff: cmp ? sumDiff / cmp : 0,
+				hTotal, cTotal, s2: stats(d2), s3: stats(d3), sy: stats(dyaw), sv: stats(dv),
+				best, big, ages,
+			});
 		}
-		report.sort((a, b) => b.s2.mean - a.s2.mean);
 
-		console.log('  type                 kind   n     lag  xy mean  xy p50   xy p95    xy max   >50  >200  >1024  yaw max   dvel');
+		// Count reconciliation first: it is what "same objects?" means.
+		report.sort((a, b) => b.diffTicks - a.diffTicks || b.maxDiff - a.maxDiff);
+		console.log('\n  OBJECT COUNT per label (comparable ticks only; ticks the client');
+		console.log('  never received are skipped, not counted as zero)');
+		console.log('  label                 cmp  skipped  count-diff  max |d|  mean |d|   host obj-ticks  client obj-ticks');
 		for (const r of report) {
-			console.log('  ' + (ENT_NAMES[r.t] || ('type' + r.t)).padEnd(20) +
-				(entIsActor(r.t) ? 'actor ' : 'proj  ') +
-				String(r.s2.n).padStart(5) +
-				String(r.best.lag).padStart(5) +
+			console.log('  ' + r.g.padEnd(20) +
+				String(r.cmp).padStart(5) + String(r.skipped).padStart(9) +
+				String(r.diffTicks).padStart(12) +
+				String(r.maxDiff).padStart(9) +
+				'  ' + f(r.meanDiff, 7) +
+				String(r.hTotal).padStart(16) + String(r.cTotal).padStart(16));
+		}
+
+		// Then pose, worst first.
+		const worst = [...report].sort((a, b) => b.s2.mean - a.s2.mean);
+		console.log('\n  POSE residual per label, at the label\'s best lag');
+		console.log('  label                 n     lag  xy mean  xy p50   xy p95    xy max   >50  >200  >1024  yaw max   dvel');
+		for (const r of worst) {
+			if (!r.s2.n) continue;
+			console.log('  ' + r.g.padEnd(20) +
+				String(r.s2.n).padStart(5) + String(r.best.lag).padStart(5) +
 				'  ' + f(r.s2.mean) + ' ' + f(r.s2.p50) + ' ' + f(r.s2.p95) + '  ' + f(r.s2.max) +
 				String(r.big[0]).padStart(5) + String(r.big[1]).padStart(6) + String(r.big[2]).padStart(7) +
 				'  ' + f(r.sy.max, 6) + '  ' + f(r.sv.mean, 6));
 		}
 
-		// Error against age for the worst type: if the two simulations agreed at
-		// birth and came apart after, the mean error grows with age.
-		if (report.length) {
-			const r = report[0];
-			console.log('\n  ' + (ENT_NAMES[r.t] || ('type' + r.t)) +
-				': xy error vs age (ticks since first seen), at lag ' + r.best.lag);
-			console.log('    error at lag 0: mean ' + f(r.lag0.mean) +
-				' p50 ' + f(r.lag0.p50) + ' p95 ' + f(r.lag0.p95) + ' max ' + f(r.lag0.max));
+		// Error against age for the worst label: constant offset (replication
+		// latency / wrong start) versus growing (real drift).
+		if (worst.length && worst[0].s2.n) {
+			const r = worst[0];
+			console.log('\n  ' + r.g + ': xy error vs age (ticks since first seen), at lag ' + r.best.lag);
 			const buckets = new Map();
 			for (const { age, d2 } of r.ages) {
 				const k = Math.floor(age / 5) * 5;
