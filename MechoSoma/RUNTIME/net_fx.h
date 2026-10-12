@@ -31,6 +31,8 @@
 
 #include "net_socket.h"
 
+#include <cstdio>
+
 class Body;
 class netSession;
 
@@ -96,6 +98,14 @@ void net_fx_actor_recv(const unsigned char* data,unsigned int len);
 	sent".
 */
 void net_fx_stats(int* projectiles,int* actors);
+
+/*
+	-netdump: write one CSV line per tracked body, E kind, tagged with the host
+	tick. Host side these are the authoritative poses, client side the locally
+	simulated ones, and the entity_id in the key column is the same on both, so
+	a host trace and a client trace line up. `f` is the trace file, or NULL.
+*/
+void net_fx_trace(FILE* f,unsigned int tick);
 
 /*
 	Host side: replicate the tracked actors' poses once, throttled internally

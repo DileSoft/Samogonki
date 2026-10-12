@@ -53,6 +53,7 @@ param(
     [int]    $RaceSec         = 30,
     [string] $JoinAddr        = '127.0.0.1',
     [switch] $Gdb,
+    [switch] $Dump,
     [string] $GdbExe          = 'C:/msys64/ucrt64/bin/gdb.exe',
     [string] $ExeName         = 'moonshine-runners.exe'
 )
@@ -104,6 +105,10 @@ function Wait-Log([string] $Path, [string] $Pattern, [int] $TimeoutSec) {
 }
 
 function New-Args([string[]] $Extra) {
+    # -Dump arms -netdump on both copies, which writes net-trace-host.csv and
+    # net-trace-client.csv next to the logs. They are collected below and can
+    # be diffed with tools/net-trace-compare.js.
+    if ($Dump) { $Extra = $Extra + '-netdump' }
     return @('-lang','ru') + $Extra
 }
 
@@ -253,6 +258,27 @@ finally {
 # Collect whatever was produced, crash or not.
 foreach ($pair in @(@($HostLog,'host.log'), @($ClientLog,'client.log'))) {
     if (Test-Path $pair[0]) { Copy-Item $pair[0] (Join-Path $OutDir $pair[1]) -Force }
+}
+
+# The per-tick state traces, when asked for, and the comparison when node is
+# available. node is a convenience: the two CSVs are plain text and the diff
+# script is just the default reader.
+if ($Dump) {
+    $hostCsv   = Join-Path $BinDir 'net-trace-host.csv'
+    $clientCsv = Join-Path $BinDir 'net-trace-client.csv'
+    foreach ($p in @($hostCsv,$clientCsv)) {
+        if (Test-Path $p) { Copy-Item $p (Join-Path $OutDir (Split-Path $p -Leaf)) -Force }
+    }
+    if ((Get-Command node -ErrorAction SilentlyContinue) -and
+        (Test-Path $hostCsv) -and (Test-Path $clientCsv)) {
+        $slot = 1
+        $slotLine = Get-Content $ClientLog -ErrorAction SilentlyContinue |
+                    Select-String -Pattern 'assigned slot (\d+)' | Select-Object -First 1
+        if ($slotLine) { $slot = [int]$slotLine.Matches[0].Groups[1].Value }
+        Write-Host ''
+        Write-Host '---- net-trace comparison ----'
+        & node (Join-Path $ToolsDir 'net-trace-compare.js') $hostCsv $clientCsv $slot
+    }
 }
 
 if ($Gdb) {

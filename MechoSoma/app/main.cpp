@@ -148,6 +148,11 @@ int main(int argc, char const *argv[]) {
       if (strcmp(argv[i], "-netdrive") == 0) {
           mchNetAutoDrive = 1;
       }
+      // -netdump writes a per-tick CSV of all networked objects (racers and
+      // replicated bodies) so a host trace and a client trace can be compared.
+      if (strcmp(argv[i], "-netdump") == 0) {
+          mchNetTrace = 1;
+      }
   }
   #ifdef STEAM_VERSION
   if (!SteamAPI_Init()) {

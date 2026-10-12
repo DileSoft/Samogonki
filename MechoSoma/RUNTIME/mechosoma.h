@@ -138,6 +138,12 @@ extern int mchNetGame;
 extern int mchNetHost;
 extern int mchNetRaceAuto;
 extern int mchNetAutoDrive;
+/*
+	mchNetTrace 1 = write a per-tick CSV of every networked object's pose and
+	parameters, next to net.log, so a host and a client trace can be diffed.
+	Set by -netdump. Diagnostic only; costs nothing when off.
+*/
+extern int mchNetTrace;
 extern char mchNetJoinAddr[128];
 extern int mchNetPort;
 extern const char* mchNetStatusText;

@@ -986,6 +986,33 @@ void net_fx_stats(int* projectiles,int* actors)
 	if(actors) *actors = a;
 }
 
+/*
+	-netdump. See net_fx.h. Same schema as the racer lines in net_game.cpp, with
+	the racer-only trailing fields left at zero: the consumer keys E rows by
+	(tick, entity_id) and reads the pose columns.
+*/
+void net_fx_trace(FILE* f,unsigned int tick)
+{
+	if(!f) return;
+
+	for(int i = 0; i < net_fx_count; i ++){
+		netFxEntry* e = &net_fx_table[i];
+		Body* b = Mdisp ? Mdisp -> searchBody(e -> body_id) : NULL;
+
+		if(!b) continue;
+
+		const Vect3f& p = b -> R();
+		const Vect3f& v = b -> Vglobal();
+
+		fprintf(f,
+			"%u,E,%u,%u,%u,%.4f,%.4f,%.4f,%.6f,%.4f,%.4f,%.4f,%.2f,"
+			"0,0,0,0,0,0,0,0,0,0,0,0,0,0\n",
+			tick,(unsigned)e -> entity_id,(unsigned)e -> type,
+			(unsigned)e -> variant,
+			p.x,p.y,p.z,b -> psi(),v.x,v.y,v.z,v.norm());
+	}
+}
+
 void net_fx_quant(void)
 {
 	int i;

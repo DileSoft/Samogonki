@@ -48,6 +48,7 @@ void mchNetBonusVisual(mchRacer* p);
 */
 
 static FILE* net_log_file = NULL;
+static FILE* net_trace_file = NULL;
 
 static void net_log(const char* fmt,...)
 {
@@ -97,6 +98,113 @@ static void net_log_close(void)
 	net_log_file = NULL;
 }
 
+/* ------------------------------ state trace ------------------------------ */
+
+/*
+	-netdump. See the note on mchNetTrace for what the three kinds of line mean.
+	One file per role, same schema, keyed by the host tick so the two can be
+	lined up row for row without knowing anything about wall clock.
+*/
+
+static void net_trace_open(void)
+{
+	if(!mchNetTrace) return;
+
+	net_trace_file = fopen(mchNetHost ? "net-trace-host.csv" : "net-trace-client.csv","w");
+
+	if(net_trace_file)
+		fprintf(net_trace_file,
+			"tick,kind,key,type,variant,px,py,pz,yaw,vx,vy,vz,speed,energy,"
+			"flags,lap,cp,place,nstar,mech,feat,pw0,pw1,pw2,st0,st1,st2\n");
+}
+
+static void net_trace_close(void)
+{
+	if(!net_trace_file) return;
+
+	fclose(net_trace_file);
+	net_trace_file = NULL;
+}
+
+static void net_trace_racer_line(unsigned int tick,char kind,int key,int type,
+	float px,float py,float pz,float yaw,float vx,float vy,float vz,
+	float speed,unsigned energy,unsigned flags,unsigned lap,unsigned cp,
+	unsigned place,unsigned nstar,unsigned mech,unsigned feat,
+	unsigned pw0,unsigned pw1,unsigned pw2,unsigned st0,unsigned st1,unsigned st2)
+{
+	if(!net_trace_file) return;
+
+	fprintf(net_trace_file,
+		"%u,%c,%d,%d,0,%.4f,%.4f,%.4f,%.6f,%.4f,%.4f,%.4f,%.2f,%u,"
+		"%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+		tick,kind,key,type,px,py,pz,yaw,vx,vy,vz,speed,energy,flags,lap,cp,
+		place,nstar,mech,feat,pw0,pw1,pw2,st0,st1,st2);
+}
+
+// The wire state of every racer in a snapshot. Identical on both sides when
+// the datagram arrived: this is what measures loss and reordering, not drift.
+static void net_trace_racers_wire(unsigned int tick,const netRacerState* racers,int count)
+{
+	for(int i = 0; i < count; i ++){
+		const netRacerState* s = &racers[i];
+
+		net_trace_racer_line(tick,'R',(int)s -> slot,(int)s -> racer_id,
+			net_uq_world(s -> pos_x),net_uq_world(s -> pos_y),net_uq_height(s -> pos_z),
+			net_uq_yaw(s -> yaw),
+			net_uq_speed(s -> vel_x),net_uq_speed(s -> vel_y),(float)s -> vel_z,
+			(float)s -> speed,(unsigned)s -> energy,(unsigned)s -> flags,
+			(unsigned)s -> lap,(unsigned)s -> checkpoint,(unsigned)s -> place,
+			(unsigned)s -> nstar,(unsigned)s -> mech_state,
+			(unsigned)(s -> features[0] | (s -> features[1] << 8) | (s -> features[2] << 16)),
+			s -> part_power[0],s -> part_power[1],s -> part_power[2],
+			s -> part_status[0],s -> part_status[1],s -> part_status[2]);
+	}
+}
+
+// What is actually in this machine's world this tick. Client side that is the
+// interpolated remote cars and the locally simulated own car.
+static void net_trace_racers_world(unsigned int tick)
+{
+	mchRacer* rp = mch_raceD -> racerLst -> first();
+	int slot = 0;
+
+	while(rp && slot < NET_MAX_PLAYERS){
+		mchMechosRacer* mr = dynamic_cast<mchMechosRacer*>(rp);
+
+		if(mr){
+			const Vect3f& p = mr -> R();
+			const Vect3f& v = mr -> Vglobal();
+			unsigned pw[NET_ACTIVE_PARTS],st[NET_ACTIVE_PARTS];
+			unsigned lap = 0,cp = 0,place = 0,nstar = 0;
+
+			for(int i = 0; i < NET_ACTIVE_PARTS; i ++){
+				cMesh* part = mr -> part_by_index(i);
+
+				pw[i] = part ? net_q_mana(part -> arcaneData.Power,part -> arcaneData.MaxPower) : 0;
+				st[i] = part ? (part -> arcaneData.Status ? 1u : 0u) : 0u;
+			}
+
+			if(rp -> stPtr){
+				lap = (unsigned)rp -> stPtr -> Lap;
+				cp = (unsigned)rp -> stPtr -> Checkpoint;
+				place = (unsigned)rp -> stPtr -> place;
+				nstar = (unsigned)(rp -> NStar + rp -> stPtr -> NStar);
+			}
+
+			net_trace_racer_line(tick,'W',slot,rp -> ID,
+				p.x,p.y,p.z,mr -> psi(),
+				v.x,v.y,v.z,v.norm(),
+				net_q_mana(mr -> Energy(),mr -> energy_max()),
+				(unsigned)rp -> flags,lap,cp,place,nstar,
+				(unsigned)mr -> state(),(unsigned)mr -> features(),
+				pw[0],pw[1],pw[2],st[0],st[1],st[2]);
+		}
+
+		rp = rp -> next;
+		slot ++;
+	}
+}
+
 // mchNumLaps, mchNumRacers and mchNumRacersDef live in the setup/race headers
 // rather than in mechosoma.h, and are declared extern in the sources that use
 // them.
@@ -139,6 +247,24 @@ int mchNetRaceAuto = 0;
 	Test scaffolding, no effect on a normal race.
 */
 int mchNetAutoDrive = 0;
+/*
+	-netdump: write a per-tick CSV of every networked object, so a host and a
+	client trace can be aligned on the host tick and compared field by field.
+
+	Three kinds of line share one schema, told apart by the `kind` column:
+
+	  R  a racer as it travels on the wire - host side the state it just packed
+	     and sent, client side the state it just unpacked. Same host tick and
+	     the same quantization on both machines, so R lines compare exactly.
+	  W  a racer as it actually is in this machine's world. Client only (a
+	     host's W would repeat its R): it is the interpolated remote cars and
+	     the locally simulated own car, which is what the player sees.
+	  E  a replicated body (class B projectiles, class C actors) as it is in
+	     this machine's world.
+
+	Diagnostic only. Off unless asked for, and when off it costs one branch.
+*/
+int mchNetTrace = 0;
 char mchNetJoinAddr[128] = "127.0.0.1";
 int mchNetPort = NET_DEFAULT_PORT;
 
@@ -334,6 +460,10 @@ static void net_send_snapshot(void)
 		}
 
 	if(!count) return;
+
+	// -netdump: the authoritative state, exactly as it goes on the wire.
+	net_trace_racers_wire(net_match_S -> tick(),racers,count);
+	net_fx_trace(net_trace_file,net_match_S -> tick());
 
 	bytes = net_snapshot_pack(payload,sizeof(payload),net_match_S -> tick(),racers,count);
 	if(bytes > 0)
@@ -610,6 +740,10 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 	netRacerState racers[NET_MAX_PLAYERS];
 	int count = net_snapshot_unpack(&hdr,racers,NET_MAX_PLAYERS,(const unsigned char*)data,len);
 
+	// -netdump: the state as it arrived, before any of it is applied. Compared
+	// against the host's R lines for the same tick this is the pure wire view.
+	net_trace_racers_wire(hdr.server_tick,racers,count);
+
 	// The header's tick is the interpolation timeline. See the buffer below.
 	for(int i = 0; i < count; i ++){
 		mchRacer* rp = net_racer_at(racers[i].slot);
@@ -733,6 +867,12 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 					   net_uq_speed(racers[i].vel_y),
 					   (float)racers[i].vel_z));
 		}
+
+	// -netdump: this machine's world after the snapshot was applied. The
+	// remote cars are on their interpolated pose and the local car on the
+	// host's, which is what the next frame actually draws.
+	net_trace_racers_world(hdr.server_tick);
+	net_fx_trace(net_trace_file,hdr.server_tick);
 }
 
 /*
@@ -1417,6 +1557,7 @@ static int net_boot(int host)
 	(void)self;
 
 	net_log_open();
+	net_trace_open();
 	net_log("net race start, %s",host ? "host" : "client");
 
 	return 1;
@@ -1951,6 +2092,7 @@ void mchNetFinit(void)
 	net_lobby_reg_players = -1;
 
 	net_log("net race end");
+	net_trace_close();
 	net_log_close();
 }
 
