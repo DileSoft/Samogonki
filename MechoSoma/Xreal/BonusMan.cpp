@@ -145,17 +145,22 @@ void BonusMan::calc_forces_and_drags()
 		}
 }
 
+void BonusMan::collect(Mechos& body)
+{
+	body.AddBonus(bonusID);
+	fxlabTakeBonus(bonusID, R());
+	// Выкидываем снова
+	setPosition(Vect3f(random(2048), random(2048), frnd(M_PI)));
+}
+
 void BonusMan::body_overlap_reaction(Body& body)
 {
 	switch(body.type()){
 		case MECHOS:
 			if(((state == Running || state == Swimming) && body.averageSpeed() > bonus_man_mechos_hit_velocity || state == Paratrooper) && dynamic_cast<Mechos&>(body).CheckBonusSlot(bonusID)){
-				dynamic_cast<Mechos&>(body).AddBonus(bonusID);
-				fxlabTakeBonus(bonusID, R());
-				// Выкидываем снова
-				setPosition(Vect3f(random(2048), random(2048), frnd(M_PI)));
+				collect(dynamic_cast<Mechos&>(body));
 				return;
-				}				
+				}
 		}
 
 	if(!turn_latency){ // Reverse

@@ -15,6 +15,9 @@
 #include "mechosoma.h"
 #include "race.h"
 #include "Mechos.h"
+#include "arcane.h"
+#include "BodyDispatcher.h"
+#include "BonusMan.h"
 #include "fxlabGeneral.h"
 #include "fxlabInterface.h"
 
@@ -765,6 +768,25 @@ static int net_rnd_seeded = 0;
 static netEvent net_event_q[NET_MAX_EVENT_PER_PACKET];
 static int net_event_q_count = 0;
 
+// One pickup can reach the host twice: its own simulation collects the man
+// a few ticks after the owner's machine already did, and both sides speak.
+// The window only has to cover the replication latency (actor states are
+// 10 Hz); no real second pickup of the same man fits inside it, because a
+// collected man is thrown to random(2048) first.
+#define NET_BONUS_DEDUP_TICKS 20 // 20 * 25 ms = 500 ms
+
+// The pickup the host last applied per slot: its arcane id and the tick it
+// ran on. Stamped by the host path of mchNetBonus, read by the report path
+// of net_apply_event.
+static int net_bonus_last_arcane[NET_MAX_PLAYERS];
+static unsigned net_bonus_last_tick[NET_MAX_PLAYERS];
+
+// How far the host's copy of a car may sit from the man its owner already
+// collected: one snapshot of pose lag plus the man's own stride. Within it
+// the report collects that very man; beyond it the effect is replayed
+// without touching any body.
+#define NET_BONUS_REPORT_RADIUS 300.f
+
 void mchNetArcaneCast(int ownerID,int part,int event,int arcane_id)
 {
 	netEvent* e;
@@ -811,6 +833,57 @@ void mchNetArcaneCast(int ownerID,int part,int event,int arcane_id)
 }
 
 /*
+	Host side: a client reports that its own car just collected a bonus.
+
+	The owner's machine runs the pickup first - its local simulation of the
+	car leads the host's - but the fields the snapshot carries are read from
+	the host's copy. Until the pickup is replayed here, every synced value
+	(part Power above all) keeps describing the pre-pickup car, which is why
+	the owner's HUD showed nothing but the passive regeneration.
+
+	The replay is unconditional - the speed and slot gates ran where the
+	pickup happened - except for the dedup window: the host's own simulation
+	collects the same man a few ticks later, before the actor state that
+	removed it arrives, and that twin has to be dropped.
+*/
+static void net_apply_client_bonus(int slot,int arcane_id,mchMechosRacer* mr)
+{
+	BonusMan* man;
+	mchBonusArcaneData* p;
+	unsigned now = net_match_S -> tick();
+
+	if(arcane_id == net_bonus_last_arcane[slot] &&
+			net_bonus_last_tick[slot] && now - net_bonus_last_tick[slot] < NET_BONUS_DEDUP_TICKS){
+		net_log("host: bonus %d on slot %d dropped, twin of a recent pickup",
+			arcane_id,slot);
+		return;
+		}
+
+	// The man the client took is still standing in the host's world.
+	// Collecting it here is the whole job: the bonus lands on the host's
+	// copy, and the throw to random(2048) is what replicates the vanish.
+	// The radius accepts the pose lag between the two simulations.
+	man = dynamic_cast<BonusMan*>(Mdisp -> searchBody(mr -> R(),Body::BONUS_MAN,mr));
+	if(man && getDist(mr -> R(),man -> R()).norm() < man -> radius() + mr -> radius() + NET_BONUS_REPORT_RADIUS){
+		net_log("host: slot %d reported bonus %d, collecting the man",slot,arcane_id);
+		man -> collect(*mr);
+		return;
+		}
+
+	// No man in reach: the pickup was of something else - a meteorite
+	// bonus, a track box - or the man has already moved. The effect still
+	// has to run against the host's copy, so the synced fields catch up.
+	p = mchGetBonusData(arcane_id);
+	if(!p){
+		net_log("host: slot %d reported bonus %d, unknown arcane",slot,arcane_id);
+		return;
+		}
+
+	net_log("host: slot %d reported bonus %d, replaying without the man",slot,arcane_id);
+	mr -> AddBonus(p -> Type);
+}
+
+/*
 	Host side: replay an event against the racer it names.
 
 	Slot is the sender's, resolved against the roster order - which is the same
@@ -837,6 +910,14 @@ static void net_apply_event(const netEvent* e)
 
 	mr = dynamic_cast<mchMechosRacer*>(rp);
 	if(!mr){ net_log("host: event slot %d is not a mechos",(int)e -> slot); return; }
+
+	// A bonus report is not an arcane event: there is no part to resolve
+	// and no Status to check. The gates ran on the owner's machine, where
+	// the pickup actually happened; this side only replays the effect.
+	if(e -> type == NET_EV_BONUS){
+		net_apply_client_bonus(e -> slot,e -> arcane_id,mr);
+		return;
+		}
 
 	m = mr -> part_by_index(e -> part);
 	if(!m){
@@ -1132,9 +1213,17 @@ void mchNetRacerFinished(int ownerID)
 }
 
 /*
-	Host side: a racer just picked up a bonus. The clients can see the box
-	vanish (it is a replicated actor) but not the fanfare, because they never
-	run the pickup for a car they only pose. Relayed like the finish.
+	Net side of a pickup, both directions.
+
+	On the host the pickup has already run against its copy, so this is the
+	fanfare relay for the machines that only pose that car, plus the stamp
+	that lets a twin report of the same pickup be dropped.
+
+	On a client this is the report itself: the owner's machine runs the
+	pickup for its own car - its local simulation leads the host's - but the
+	host owns every replicated field of that car. Until it hears, the
+	snapshot keeps describing the pre-pickup car, and the synced bars show
+	nothing but the passive regeneration.
 */
 void mchNetBonus(int ownerID,int arcane_id)
 {
@@ -1142,9 +1231,28 @@ void mchNetBonus(int ownerID,int arcane_id)
 	mchRacer* rp;
 	int slot = 0;
 
-	if(!mchNetGame || !mchNetHost) return;
+	if(!mchNetGame) return;
 	if(!net_session_S || !net_match_S || !mch_raceD) return;
 	if(net_match_S -> state() != NET_MATCH_RUNNING) return;
+
+	if(!mchNetHost){
+		if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET){
+			net_log("client: event queue full, bonus %d dropped",arcane_id);
+			return;
+			}
+
+		e = &net_event_q[net_event_q_count ++];
+
+		memset(e,0,sizeof(netEvent));
+
+		e -> type = NET_EV_BONUS;
+		e -> slot = (unsigned char)net_match_S -> local_slot();
+		e -> arcane_id = (unsigned char)arcane_id;
+
+		net_log("client: bonus %d pickup queued",arcane_id);
+		return;
+		}
+
 	if(net_event_q_count >= NET_MAX_EVENT_PER_PACKET) return;
 
 	rp = mch_raceD -> racerLst -> first();
@@ -1155,6 +1263,9 @@ void mchNetBonus(int ownerID,int arcane_id)
 		}
 
 	if(!rp) return;
+
+	net_bonus_last_arcane[slot] = arcane_id;
+	net_bonus_last_tick[slot] = net_match_S -> tick();
 
 	e = &net_event_q[net_event_q_count ++];
 
@@ -1233,8 +1344,9 @@ static void net_apply_visual_event(const netEvent* e)
 		}
 
 	if(e -> type == NET_EV_BONUS){
-		// The pickup happened on the host. The picking machine already ran it
-		// locally (its own car, simulated here), so only the others draw it.
+		// The relayed pickup ran on the host - its own, or its replay of the
+		// owner's report. The picking machine already ran it locally (its own
+		// car, simulated here), so only the others draw it.
 		if(e -> slot != net_match_S -> local_slot()){
 			mchNetBonusVisual(rp);
 			net_log("client: racer %d took bonus %d",(int)e -> slot,(int)e -> arcane_id);
