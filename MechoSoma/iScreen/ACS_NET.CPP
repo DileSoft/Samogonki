@@ -1008,7 +1008,11 @@ int acsNetMenuExtEvent(int row,int dir)
 			nm_set_text(NM_ADDR,nm_conn ? nm_lobby_addr : nm_addr);
 			break;
 		case NM_ADDR:
-			if(nm_host || nm_lobby) return 1;
+			if(nm_lobby) return 1;
+			// A direct host has nobody to reach, so the row is not for it.
+			// In lobby mode both roles dial the rendezvous server, so the
+			// host edits the address too.
+			if(nm_host && !nm_conn) return 1;
 			acsScrD -> PrepareInput(NM_ADDR);
 			return 1;
 		case NM_NAME:
