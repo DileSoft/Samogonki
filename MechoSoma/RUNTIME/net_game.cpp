@@ -338,6 +338,8 @@ static int net_lobby_reg_players = -1;	// host: last player count registered
 static int net_lobby_host_known = 0;
 static unsigned int net_lobby_host_ip = 0;
 static unsigned short net_lobby_host_port = 0;
+static int net_lobby_join_id = -1;	// client: match id it asked to join
+static unsigned int net_lobby_join_ms = 0;	// client: when the JOIN was last sent
 
 // Last sampled position per slot, so the periodic log can say whether the
 // field is actually driving or just sitting there.
@@ -1929,6 +1931,7 @@ int mchNetLobbyServerHost(const char* lobby_addr,const char* host_name,
 	net_lobby_browse = 0;
 	net_lobby_joined = 0;
 	net_lobby_reg_players = -1;
+	net_lobby_join_id = -1;
 
 	net_lobby_ensure();
 
@@ -1953,6 +1956,7 @@ int mchNetLobbyServerJoin(const char* lobby_addr,const char* player_name,
 	net_lobby_joined = 0;
 	net_lobby_host_known = 0;
 	net_lobby_list_ms = 0;
+	net_lobby_join_id = -1;
 
 	net_lobby_ensure();
 
@@ -1971,6 +1975,7 @@ void mchNetLobbyServerHangup(void)
 	net_lobby_joined = 0;
 	net_lobby_host_known = 0;
 	net_lobby_reg_players = -1;
+	net_lobby_join_id = -1;
 }
 
 /*
@@ -2028,6 +2033,20 @@ void mchNetMenuPump(void)
 		if((int)(now - net_lobby_list_ms) >= 2000){
 			net_lobby_list_ms = now;
 			net_lobby_S -> request_list();
+		}
+	}
+
+	// Client: the introduction is not a one-shot. A JOIN sent before this
+	// game's probe reached the server - or a PEER lost on the way - would
+	// otherwise strand both sides: the browser would never leave and the host
+	// would never hear a HELLO. Keep asking once a second until the transport
+	// has actually seated this client. Once seated, both sides see it.
+	if(!mchNetHost && net_lobby_S -> ready() && net_lobby_join_id >= 0 &&
+	   net_match_S && net_match_S -> local_slot() < 0){
+		if((int)(now - net_lobby_join_ms) >= 1000){
+			net_lobby_join_ms = now;
+			net_log("client: re-asking to join match %d",net_lobby_join_id);
+			net_lobby_S -> join((unsigned short)net_lobby_join_id);
 		}
 	}
 
@@ -2116,7 +2135,14 @@ void mchNetLobbyBrowseRefresh(void)
 void mchNetLobbyBrowseJoin(int index)
 {
 	const netLobbyMatch* m = net_lobby_S ? net_lobby_S -> match(index) : NULL;
-	if(m && !net_lobby_joined) net_lobby_S -> join(m -> id);
+	if(m && !net_lobby_joined){
+		// Remember the pick: mchNetMenuPump re-sends it once a second until
+		// the server introduces the host and the session seats this client.
+		net_lobby_join_id = (int)m -> id;
+		net_lobby_join_ms = (unsigned int)clocki();
+		net_log("client: asking to join match %d",net_lobby_join_id);
+		net_lobby_S -> join(m -> id);
+	}
 }
 
 void mchNetStart(void)
@@ -2208,6 +2234,7 @@ void mchNetFinit(void)
 	net_lobby_joined = 0;
 	net_lobby_host_known = 0;
 	net_lobby_reg_players = -1;
+	net_lobby_join_id = -1;
 
 	net_log("net race end");
 	net_trace_close();
