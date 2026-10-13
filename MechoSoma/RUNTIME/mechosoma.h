@@ -275,8 +275,10 @@ void mchNetGameOver(void);
 void mchNetRacerFinished(int ownerID);
 
 /*
-	Host side: a racer picked up a bonus. The clients see a remote car only
-	from snapshots, so the pickup fanfare is relayed. No-op off the host.
+	Net side of a bonus pickup. On a client this reports the pickup of its
+	own car - its local simulation runs it first, but the host owns every
+	replicated field of that car. On the host this relays the fanfare to
+	the machines that only pose the car.
 */
 void mchNetBonus(int ownerID,int arcane_id);
 

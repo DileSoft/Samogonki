@@ -353,7 +353,9 @@ enum netEventTypes
 	NET_EV_ARCANE_STOP,
 	NET_EV_ARCANE_STOP_VISUAL,
 	NET_EV_ARCANE_LATCH,		// target_id: the racer a spell latched onto
-	NET_EV_BONUS,			// arcane_id: the bonus a racer just picked up
+	NET_EV_BONUS,			// arcane_id: a pickup. Host to clients: the fanfare.
+					// Client to host: the report the host replays against
+					// its copy of that slot's racer (net_apply_client_bonus).
 
 	NET_EV_MAX
 };

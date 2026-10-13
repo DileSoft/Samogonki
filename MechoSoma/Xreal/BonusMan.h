@@ -29,6 +29,11 @@ public:
 	void setPositionInit();
 	void calc_forces_and_drags();
 	void body_overlap_reaction(Body& body);
+	// The pickup action itself, gates already passed: hand the bonus over,
+	// fanfare, and throw the man back into the world. body_overlap_reaction
+	// runs it for a local overlap; the net layer runs it for a pickup its
+	// owner reported from another machine.
+	void collect(class Mechos& body);
 	int is_colliding_with(const Body& body){ return 1; }
 	void write_state(XBuffer& buf);
 	void beep(const Vect3f& pos);

@@ -1426,9 +1426,11 @@ void fxlabBonusEvent(int id,struct mchRacer* owner)
 	int d;
 	fxlabGeneralObjectType* t;
 
-	// The host owns every racer's bonuses, so this runs where a pickup is
-	// decided. A client poses other cars and never reaches here for them, so
-	// the fanfare for a remote pickup has to be relayed. No-op off the host.
+	// A pickup is decided wherever the car is simulated: the host for its
+	// own and every posed copy, the owner's machine for its own car. On the
+	// host this relays the fanfare; on a client it reports the pickup, so
+	// the host can apply the bonus to its copy and the replicated fields
+	// stop describing the pre-pickup car.
 	mchNetBonus(owner -> ID,id);
 
 	if(owner->Type == MCH_RACER_TYPE_MECHOS){
