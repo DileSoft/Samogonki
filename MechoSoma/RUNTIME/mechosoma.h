@@ -199,6 +199,7 @@ void mchNetLobbySetLocal(const char* name,int figure,const int* spells);
 void mchNetLobbySetGameName(const char* name);
 const char* mchNetGameName(void);
 int  mchNetPlayerFigure(int slot);
+int  mchNetRacerHostStanding(const struct mchRacer* r,int& lap,int& checkpoint);
 int  mchNetPlayerConfig(int slot,char* out,int sz);
 void mchNetLogGrid(void);
 int  mchNetBotFigure(unsigned int taken_mask);

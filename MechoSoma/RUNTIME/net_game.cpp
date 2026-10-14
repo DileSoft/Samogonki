@@ -386,6 +386,19 @@ static Vect3f net_local_auth_vel;
 static float net_local_auth_yaw = 0;
 static int net_local_auth_valid = 0;
 
+/*
+	The host's race progress for the local car: Lap and Checkpoint as its
+	authoritative copy has them. The client counts its own car's line crossings
+	so its passes animate, but that count can run a checkpoint ahead of the
+	host's for good, and the checkpoint a racer is entitled to is read off
+	Lap/Checkpoint. The count on screen and the stars a pass is worth are
+	therefore compared against these, not the local pointer - see
+	mchNetRacerHostStanding.
+*/
+static int net_local_stand_lap = 0;
+static int net_local_stand_cp = 0;
+static int net_local_stand_valid = 0;
+
 // Per slot, whether the horn was held last tick. The host plays one beep per
 // press, so the relay has to fire on the rising edge too.
 static int net_horn_last[NET_MAX_PLAYERS];
@@ -716,6 +729,30 @@ static mchRacer* net_racer_at(int slot)
 }
 
 /*
+	The host's Lap/Checkpoint for a racer, when this machine is a client and
+	that racer is its own car. Returns 0 for every other racer and on the
+	host; the caller then keeps the racer's own stPtr values.
+
+	Used by getCheckpointNStar/setCheckpointNStar: the checkpoint a racer is
+	entitled to is read off Lap/Checkpoint, and the client's own count can sit
+	a checkpoint ahead of the host's for the rest of the race. Comparing
+	against the host's numbers keeps the stars on screen and the stars a pass
+	is worth the same as the host's, while the local pointer is left alone so
+	its passes still animate.
+*/
+int mchNetRacerHostStanding(const mchRacer* r,int& lap,int& checkpoint)
+{
+	if(mchNetHost || !mchNetGame || !net_match_S) return 0;
+	if(!net_local_stand_valid) return 0;
+	if(r != net_racer_at(net_match_S -> local_slot())) return 0;
+
+	lap = net_local_stand_lap;
+	checkpoint = net_local_stand_cp;
+
+	return 1;
+}
+
+/*
 	Client side: correct the locally simulated car when it has really come off
 	the host's copy.
 
@@ -920,22 +957,21 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			}
 
 			/*
-				Race progress is host-authoritative as well. The local car is
-				put on the host's pose every snapshot, so in between it is the
-				client's own position that decides when it crosses a line. A
-				checkpoint the client's interpolation crossed a moment before
-				the host's copy would then be counted here and never taken
-				back, leaving the client a checkpoint - and a place - ahead for
-				the rest of the race: the checkpoint stars read as if it led.
-				Lap and Checkpoint (and place) come from the host; the stars
-				the car has collected do not, so a pickup stays instant and the
-				bonus report still owns that field.
+				Race progress is host-authoritative, but the local pointer stays
+				local. The client counts its own line crossings so a pass plays
+				its animation and sound; overwriting the pointer from the host
+				skipped a crossing the host's copy had already counted and the
+				animation was lost. What must not stay local is the *standing*:
+				the checkpoint on screen and the stars a pass is worth are read
+				off Lap/Checkpoint, and a crossing the client counted a frame
+				early stuck forever, leaving it a checkpoint ahead. So the
+				host's Lap/Checkpoint are kept aside here and read back through
+				mchNetRacerHostStanding, which getCheckpointNStar and
+				setCheckpointNStar use in place of this car's own count.
 			*/
-			if(rp -> stPtr){
-				rp -> stPtr -> Lap = racers[i].lap;
-				rp -> stPtr -> Checkpoint = racers[i].checkpoint;
-				rp -> stPtr -> place = racers[i].place;
-				}
+			net_local_stand_lap = racers[i].lap;
+			net_local_stand_cp = racers[i].checkpoint;
+			net_local_stand_valid = 1;
 
 			continue;
 			}
@@ -2368,6 +2404,7 @@ void mchNetFinit(void)
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
+	net_local_stand_valid = 0;
 	memset(net_horn_last,0,sizeof(net_horn_last));
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;

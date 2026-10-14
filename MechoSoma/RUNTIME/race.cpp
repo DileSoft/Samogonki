@@ -3685,9 +3685,24 @@ int mchRacer::stopFnc(void)
 	return ret;
 }
 
+/*
+	Lap/Checkpoint to rank a racer by. On a client the local car's own count
+	can run a checkpoint ahead of the host's for good, so for that one racer the
+	host's numbers win (see mchNetRacerHostStanding). The stars on a checkpoint
+	and the stars a pass is worth then agree with every other machine, while
+	the local pointer itself is left to the client so its passes still animate.
+*/
+static void racer_stand(const mchRacer* p,int& lap,int& checkpoint)
+{
+	lap = p -> stPtr -> Lap;
+	checkpoint = p -> stPtr -> Checkpoint;
+
+	mchNetRacerHostStanding(p,lap,checkpoint);
+}
+
 void mchRaceDispatcher::setCheckpointNStar(mchRacer* r)
 {
-	int pl = 0;
+	int pl = 0,rl,rc;
 	mchRacer* p;
 	mchCheckpoint* cp;
 
@@ -3697,10 +3712,15 @@ void mchRaceDispatcher::setCheckpointNStar(mchRacer* r)
 		return;
 
 	cp = getCP(r -> stPtr -> Checkpoint);
+	racer_stand(r,rl,rc);
 
 	p = racerLst -> first();
 	while(p){
-		if(p -> stPtr -> Lap > r -> stPtr -> Lap || (p -> stPtr -> Lap == r -> stPtr -> Lap && p -> stPtr -> Checkpoint > r -> stPtr -> Checkpoint))
+		int lp,lc;
+
+		racer_stand(p,lp,lc);
+
+		if(lp > rl || (lp == rl && lc > rc))
 			pl ++;
 		p = p -> next;
 	}
@@ -3713,7 +3733,7 @@ void mchRaceDispatcher::setCheckpointNStar(mchRacer* r)
 
 int mchRaceDispatcher::getCheckpointNStar(mchRacer* r)
 {
-	int pl = 0,cnt;
+	int pl = 0,cnt,rl,rc;
 	mchRacer* p;
 	mchCheckpoint* cp;
 
@@ -3724,9 +3744,15 @@ int mchRaceDispatcher::getCheckpointNStar(mchRacer* r)
 	if(r -> flags & MCH_FINISHED || !cp -> ID) 
 		return 0;
 
+	racer_stand(r,rl,rc);
+
 	p = racerLst -> first();
 	while(p){
-		if(p -> stPtr -> Lap > r -> stPtr -> Lap || (p -> stPtr -> Lap == r -> stPtr -> Lap && p -> stPtr -> Checkpoint > r -> stPtr -> Checkpoint))
+		int lp,lc;
+
+		racer_stand(p,lp,lc);
+
+		if(lp > rl || (lp == rl && lc > rc))
 			pl ++;
 		p = p -> next;
 	}
