@@ -22,6 +22,7 @@ targetMechos(*new ShareHandle<Mechos>)
 	enabled_fields = FieldSource::Attraction | FieldSource::Vortex | FieldSource::Magnetic;
 	parentMesh = 0;
 	targetMechos = 0;
+	owner_mechos = 0;
 	do_merge_to_mechos = 0;
 	distance_to_mechos = DBL_INF;
 	character = M3D_TYPE(geometry -> Type) == M3D_ENGINE;
@@ -128,6 +129,7 @@ void Part::merge_to_mechos()
 	geometry -> ClearAttribute(MESH_LIGHTING_MUL | MESH_NOT_METALL);
 	targetMechos -> addPart(geometry);
 	geometry = 0;
+	owner_mechos = 0;
 	kill();
 }
 
@@ -219,6 +221,32 @@ Part* BodyDispatcher::searchPart(const Mechos& mechos, int Type, int Kind)
 				}
 			}
 	return nearest_part;
+}
+
+/*
+	Remove the loose parts a mechos left when it broke up. A client that
+	rebuilds a car on the host's parts has no parts to merge back, so without
+	this its own wreck would lie on the track forever. Parts from another car
+	are left alone: they are that car's wreck, not this one's.
+*/
+void BodyDispatcher::deletePartsOf(const Mechos* mechos)
+{
+	BodyList::iterator bi;
+	TmpBodyList doomed;
+
+	FOR_EACH(total_bodies, bi)
+		if((*bi) -> type() == Body::PART){
+			Part& p = static_cast<Part&>(**bi);
+
+			// A part another car is already pulling in is left for that car
+			// to consume: removing it here would leave that car waiting on a
+			// body that can never merge.
+			if(p.owner_mechos == mechos && !p.targetMechos)
+				doomed.push_back(&p);
+			}
+
+	for(TmpBodyList::size_type i = 0; i < doomed.size(); i ++)
+		deleteBody(doomed[i]);
 }
 
 void cMesh::attachDummyChildren(const int Kinds[])

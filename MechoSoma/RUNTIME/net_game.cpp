@@ -834,9 +834,21 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			host's Power and Status on its new parts rather than on the meshes
 			the rebuild throws away.
 		*/
-		if(racers[i].mech_state == Mechos::NORMAL_MECHOS)
+		if(racers[i].mech_state == Mechos::NORMAL_MECHOS){
+			unsigned char before[NET_ACTIVE_PARTS];
+
+			for(int p = 0; p < NET_ACTIVE_PARTS; p ++){
+				cMesh* pm = mr -> part_by_index(p);
+				before[p] = pm ? (unsigned char)M3D_KIND(pm -> Type) : 0;
+				}
+
 			if(mr -> net_sync_parts(racers[i].part_kind))
-				net_log("client: slot %d parts synced from host",(int)racers[i].slot);
+				net_log("client: slot %d parts synced %d %d %d %d -> %d %d %d %d",
+					(int)racers[i].slot,
+					(int)before[0],(int)before[1],(int)before[2],(int)before[3],
+					(int)racers[i].part_kind[0],(int)racers[i].part_kind[1],
+					(int)racers[i].part_kind[2],(int)racers[i].part_kind[3]);
+			}
 
 		/*
 			Arcane state goes to every racer, the local one included. A
@@ -906,6 +918,24 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 					net_log("client: local car released");
 					}
 			}
+
+			/*
+				Race progress is host-authoritative as well. The local car is
+				put on the host's pose every snapshot, so in between it is the
+				client's own position that decides when it crosses a line. A
+				checkpoint the client's interpolation crossed a moment before
+				the host's copy would then be counted here and never taken
+				back, leaving the client a checkpoint - and a place - ahead for
+				the rest of the race: the checkpoint stars read as if it led.
+				Lap and Checkpoint (and place) come from the host; the stars
+				the car has collected do not, so a pickup stays instant and the
+				bonus report still owns that field.
+			*/
+			if(rp -> stPtr){
+				rp -> stPtr -> Lap = racers[i].lap;
+				rp -> stPtr -> Checkpoint = racers[i].checkpoint;
+				rp -> stPtr -> place = racers[i].place;
+				}
 
 			continue;
 			}

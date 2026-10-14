@@ -19,6 +19,10 @@ class Part : public Body {
 
 	// Link tools //////
 	ShareHandle<Mechos>& targetMechos;
+	// The mechos this part was detached from, for the net part sync: a client
+	// rebuilding its car has to clear away the parts its own wreck left lying
+	// around, and only those. 0 once the part is merged back or built fresh.
+	Mechos* owner_mechos;
 	cMesh* parentMesh;
 	Vect3f linkOffset;
 	int character; 

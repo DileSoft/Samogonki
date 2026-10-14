@@ -36,6 +36,10 @@ public:
 	Body* searchBody(const Vect3f& R, int body_type, const Body* ignored_body = 0);
 	Body* searchBody(GetDistanceFunction metric, int body_type);
 	Part* searchPart(const Mechos& mechos, int m3dType, int m3dKind = 0); // default - any Kind
+	// Net part sync: remove the loose parts a mechos left behind when it broke
+	// up, so a rebuilt car does not leave its wreck lying on the ground. Only
+	// parts that car detached, never another car's.
+	void deletePartsOf(const Mechos* mechos);
 	void test_mechos_wheels_to_bodies_collisions(Body& mechos);
 
 	// Работа с источниками поля

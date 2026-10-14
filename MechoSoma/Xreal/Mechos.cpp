@@ -445,13 +445,21 @@ int Mechos::net_sync_parts(const unsigned char* kinds)
 		return 0;
 
 	// Loose parts this copy was pulling in must not merge into the rebuilt car
-	// on top of the host's parts; release them to fall as plain debris.
+	// on top of the host's parts; release them. A part it pulled in can be
+	// another car's wreck, so this is separate from the sweep that clears away
+	// the parts this car detached itself.
 	for(i = 0; i < NUM_PARTS; i ++){
 		if(attracted_parts[i]){
 			attracted_parts[i] -> targetMechos = 0;
 			attracted_parts[i] = 0;
 			}
 		}
+
+	// This car's own scattered parts are replaced by the rebuilt one. On the
+	// host they were merged back as the car collected them, so nothing is left
+	// behind; a client that rebuilds instead of collecting has to sweep them,
+	// or the wreck lies on the track for the rest of the race.
+	Mdisp -> deletePartsOf(this);
 
 	Kinds[PART_INDEX(M3D_LF_WHEEL)] = Kinds[PART_INDEX(M3D_RF_WHEEL)];
 	Kinds[PART_INDEX(M3D_LB_WHEEL)] = Kinds[PART_INDEX(M3D_RB_WHEEL)];
@@ -485,6 +493,7 @@ Part* Mechos::detachPart(int part_id, int formic)
 		xrealM3D -> Attach(mesh);
 
 		Part* part = new Part(mesh, formic);
+		part -> owner_mechos = this;
   		Mdisp -> attachBody(part);
 		if(!formic){
 			xassert(M3D_TYPE(mesh -> Type) != M3D_ENGINE);
