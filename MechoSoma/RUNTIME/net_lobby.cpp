@@ -56,6 +56,12 @@ void netLobbyClient::close(void)
 	_registered_id = 0;
 	_peer_count = 0;
 	_status[0] = 0;
+
+	// Empty the buffers as well as their lengths: the parse walks them from
+	// index 0 and only the length says where the live bytes end, so a buffer
+	// left NUL-terminated nowhere could be read as a line that was never sent.
+	_in[0] = 0;
+	_out[0] = 0;
 }
 
 void netLobbyClient::dial(const char* host,unsigned short port)

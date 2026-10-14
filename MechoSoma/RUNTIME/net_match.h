@@ -177,6 +177,8 @@ private:
 	int _start_ack_timeout_ms;
 	int _client_figure;		// client: mechos sent in its next HELLO
 	int _client_spells[NET_LOBBY_SPELLS];
+	char _client_name[NET_NAME_LEN];	// client: name sent in its HELLOs
+	unsigned int _last_hello_ms;		// client: when the HELLO last went out
 
 	unsigned int _start_tick;
 	unsigned int _start_time_ms;
@@ -212,6 +214,8 @@ private:
 	void roster_changed(void);
 	void update_tick(unsigned int now);
 	void free_lost_slots(void);
+
+	void send_hello(void);
 
 	void send_welcome(int peer_id,int slot);
 	void send_roster(int reliable);

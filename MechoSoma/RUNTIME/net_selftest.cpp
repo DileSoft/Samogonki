@@ -1559,6 +1559,7 @@ static int net_test_client_lobby(FILE* f)
 	unsigned short port = 0;
 	unsigned int ip = 0;
 	char srv_in[1024];
+	srv_in[0] = 0;
 	int srv_len = 0;
 	int got_ready = 0,got_match = 0,got_peer = 0;
 	unsigned short peer_port = 0;

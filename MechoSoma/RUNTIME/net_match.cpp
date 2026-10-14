@@ -52,6 +52,8 @@ netMatch::netMatch(netSession* sess) : _sess(sess)
 	_client_figure = 0;
 	for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
 		_client_spells[i] = 0;
+	_client_name[0] = 0;
+	_last_hello_ms = 0;
 
 	_start_tick = 0;
 	_start_time_ms = 0;
@@ -216,15 +218,45 @@ int netMatch::open_host(const char* server_name,unsigned char world_id,unsigned 
 
 int netMatch::open_client(const char* player_name)
 {
-	netHello hello;
-	int peer = server_peer();
-
-	if(peer < 0) return 0;
+	if(server_peer() < 0) return 0;
 
 	_is_host = 0;
 	_state = NET_MATCH_LOBBY;
 
 	set_status("Connecting");
+
+	if(player_name){
+		strncpy(_client_name,player_name,NET_NAME_LEN - 1);
+		_client_name[NET_NAME_LEN - 1] = 0;
+		}
+	else
+		_client_name[0] = 0;
+
+	// Reliable: a lost HELLO must not cost the host its slot assignment.
+	send_hello();
+
+	reset_roster();
+
+	_loaded = 0;
+	_pending_start_ack = 0;
+
+	return 1;
+}
+
+/*
+	The client's HELLO: who it is and what it drives. Sent on connecting,
+	again whenever the mechos or name changes, and re-sent periodically while
+	the match is still in the lobby. The host treats every one as an update
+	and re-seats if it ever dropped the slot, so the two rosters cannot stay
+	out of step - which is what left one side showing the other not in the
+	lobby until the race began.
+*/
+void netMatch::send_hello(void)
+{
+	netHello hello;
+	int peer = server_peer();
+
+	if(peer < 0) return;
 
 	memset(&hello,0,sizeof(hello));
 	hello.proto_version = (unsigned short)NET_PROTO_VERSION;
@@ -235,20 +267,14 @@ int netMatch::open_client(const char* player_name)
 	for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
 		hello.spells[i] = (unsigned char)_client_spells[i];
 
-	if(player_name){
-		strncpy((char*)hello.name,player_name,NET_NAME_LEN - 1);
+	if(_client_name[0]){
+		strncpy((char*)hello.name,_client_name,NET_NAME_LEN - 1);
 		hello.name[NET_NAME_LEN - 1] = 0;
 		}
 
-	// Reliable: a lost HELLO must not cost the host its slot assignment.
 	_sess -> send(peer,NET_MSG_HELLO,&hello,sizeof(hello),1);
 
-	reset_roster();
-
-	_loaded = 0;
-	_pending_start_ack = 0;
-
-	return 1;
+	_last_hello_ms = (unsigned int)clocki();
 }
 
 /* ------------------------------- CLIENT --------------------------------- */
@@ -352,29 +378,12 @@ void netMatch::set_local_player(const char* name,int figure,const int* spells)
 	// HELLO carrying the new mechos.
 	set_client_mechos(figure,spells);
 
-	{
-		int peer = server_peer();
-
-		if(peer >= 0){
-			netHello hello;
-
-			memset(&hello,0,sizeof(hello));
-			hello.proto_version = (unsigned short)NET_PROTO_VERSION;
-			hello.client_build = (unsigned char)NET_PROTO_VERSION;
-			hello.input_rate_hz = (unsigned char)NET_TICK_RATE_HZ;
-			hello.figure = (unsigned char)_client_figure;
-
-			for(int i = 0; i < NET_LOBBY_SPELLS; i ++)
-				hello.spells[i] = (unsigned char)_client_spells[i];
-
-			if(name){
-				strncpy((char*)hello.name,name,NET_NAME_LEN - 1);
-				hello.name[NET_NAME_LEN - 1] = 0;
-				}
-
-			_sess -> send(peer,NET_MSG_HELLO,&hello,sizeof(hello),1);
-			}
+	if(name){
+		strncpy(_client_name,name,NET_NAME_LEN - 1);
+		_client_name[NET_NAME_LEN - 1] = 0;
 		}
+
+	send_hello();
 }
 
 void netMatch::notify_loaded(void)
@@ -929,9 +938,16 @@ void netMatch::quant(void)
 		free_lost_slots();
 
 		// Roster on change, plus a heartbeat: a peer that misses one still
-		// catches the next, and late arrivals are never invisible.
-		if(_roster_dirty || (int)(now - _last_roster_ms) >= NET_ROSTER_MS){
+		// catches the next, and late arrivals are never invisible. A change
+		// itself goes reliably, so a seat or a leave cannot be the heartbeat
+		// that got lost - which is what left one side showing the other not
+		// in the lobby.
+		if(_roster_dirty){
 			_roster_dirty = 0;
+			_last_roster_ms = now;
+			send_roster(1);
+			}
+		else if((int)(now - _last_roster_ms) >= NET_ROSTER_MS){
 			_last_roster_ms = now;
 			send_roster(0);
 			}
@@ -977,6 +993,14 @@ void netMatch::quant(void)
 		}
 
 	/* ------------------------------ client --------------------------- */
+
+	// Keep re-announcing while still in the lobby. The host answers every
+	// HELLO by re-seating and re-broadcasting the roster, so if it ever
+	// dropped this client - a peer it gave up on, a roster it rebuilt - the
+	// next HELLO two seconds later brings it back, instead of both sides
+	// disagreeing about who is in the lobby until the race begins.
+	if(_state == NET_MATCH_LOBBY && (int)(now - _last_hello_ms) >= 2000)
+		send_hello();
 
 	// Nothing to run: the game layer reads ms_until_start() to know when to
 	// call mchSetTimeMode(MCH_TIME_RUNNING), and nothing else here depends

@@ -1269,6 +1269,11 @@ int MainMenuRTO::Quant(void)
 	if(mch_iScreen){
 		if(mchSkipMainMenu)
 			ret = (mchPBEM_Game) ? 4 : 2;
+		else if(mchNetRaceAuto && mchNetLobbyAuto){
+			// Drive the rendezvous handshake with no menu; -netlobbyhost /
+			// -netlobbyjoin. Stay until it reports the race may load.
+			ret = mchNetLobbyAutoQuant() ? 2 : 0;
+			}
 		else if(mchNetRaceAuto && mchNetGame){
 			// No human, no menu. This is the value the F2 keypress on the
 			// multiplayer screen produces, reached without a screen at all.

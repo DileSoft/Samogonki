@@ -173,6 +173,20 @@ int main(int argc, char const *argv[]) {
       if (strcmp(argv[i], "-networld") == 0 && i + 1 < argc) {
           mchNetMenuWorld = atoi(argv[i + 1]);
       }
+      // -netlobbyhost / -netlobbyjoin drive the lobby-server path with no
+      // menu, to exercise the rendezvous handshake end to end. Test scaffolding.
+      if (strcmp(argv[i], "-netlobbyhost") == 0 && i + 1 < argc) {
+          mchNetRaceAuto = 1;
+          mchNetLobbyAuto = 1;
+          mchNetHost = 1;
+          strncpy(mchNetLobbyAutoAddr, argv[i + 1], sizeof(mchNetLobbyAutoAddr) - 1);
+      }
+      if (strcmp(argv[i], "-netlobbyjoin") == 0 && i + 1 < argc) {
+          mchNetRaceAuto = 1;
+          mchNetLobbyAuto = 1;
+          mchNetHost = 0;
+          strncpy(mchNetLobbyAutoAddr, argv[i + 1], sizeof(mchNetLobbyAutoAddr) - 1);
+      }
       // -netdump writes a per-tick CSV of all networked objects (racers and
       // replicated bodies) so a host trace and a client trace can be compared.
       if (strcmp(argv[i], "-netdump") == 0) {

@@ -220,6 +220,15 @@ int  mchNetLobbyServerHost(const char* lobby_addr,const char* host_name,const ch
 int  mchNetLobbyServerJoin(const char* lobby_addr,const char* player_name,int figure,const int* spells);
 void mchNetLobbyServerHangup(void);
 void mchNetMenuPump(void);
+
+/*
+	-netlobbyhost <addr> / -netlobbyjoin <addr>: drive the lobby-server path
+	with no menu, for a test. mchNetLobbyAutoQuant runs one frame of it and
+	returns 1 once the race may load. Test scaffolding.
+*/
+extern int  mchNetLobbyAuto;
+extern char mchNetLobbyAutoAddr[128];
+int  mchNetLobbyAutoQuant(void);
 int  mchNetLobbyClientJoined(void);
 int  mchNetLobbyBrowseState(void);
 const char* mchNetLobbyBrowseStatus(void);

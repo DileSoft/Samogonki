@@ -374,6 +374,31 @@ static unsigned short net_lobby_host_port = 0;
 static int net_lobby_join_id = -1;	// client: match id it asked to join
 static unsigned int net_lobby_join_ms = 0;	// client: when the JOIN was last sent
 
+// -netlobbyhost / -netlobbyjoin: drive the rendezvous path with no menu.
+// Test scaffolding, see mchNetLobbyAutoQuant.
+int mchNetLobbyAuto = 0;
+char mchNetLobbyAutoAddr[128] = "";
+
+/*
+	Host side: the endpoints the lobby server has introduced. The client
+	retries its JOIN, which brings a fresh introduction every second, but a
+	client whose control connection dropped keeps dialling on its own. This
+	list makes the host keep knocking at each introduced endpoint for a while
+	instead of only in the instant the introduction lands, so the host's NAT
+	mapping stays open for the client's retried hello.
+*/
+struct netLobbyKnock
+{
+	unsigned int ip;
+	unsigned short port;
+	unsigned int next_ms;
+	int tries;
+};
+
+static netLobbyKnock net_lobby_knock[NET_MAX_PLAYERS];
+static int net_lobby_knock_count = 0;
+static int net_lobby_seated_logged = 0;
+
 // Last sampled position per slot, so the periodic log can say whether the
 // field is actually driving or just sitting there.
 static Vect3f net_motion_last[NET_MAX_PLAYERS];
@@ -2202,6 +2227,46 @@ void mchNetLobbyServerHangup(void)
 	net_lobby_host_known = 0;
 	net_lobby_reg_players = -1;
 	net_lobby_join_id = -1;
+	net_lobby_knock_count = 0;
+	net_lobby_seated_logged = 0;
+}
+
+static void net_lobby_knock_remember(unsigned int ip,unsigned short port)
+{
+	for(int i = 0; i < net_lobby_knock_count; i ++){
+		if(net_lobby_knock[i].ip == ip && net_lobby_knock[i].port == port){
+			net_lobby_knock[i].next_ms = 0;
+			return;
+			}
+		}
+
+	if(net_lobby_knock_count >= NET_MAX_PLAYERS) return;
+
+	net_lobby_knock[net_lobby_knock_count].ip = ip;
+	net_lobby_knock[net_lobby_knock_count].port = port;
+	net_lobby_knock[net_lobby_knock_count].next_ms = 0;
+	net_lobby_knock[net_lobby_knock_count].tries = 0;
+	net_lobby_knock_count ++;
+}
+
+static void net_lobby_knock_quant(unsigned int now)
+{
+	if(!net_session_S) return;
+
+	for(int i = 0; i < net_lobby_knock_count; i ++){
+		netLobbyKnock* k = &net_lobby_knock[i];
+
+		if(k -> tries >= 60) continue;
+		if(k -> next_ms && (int)(now - k -> next_ms) < 0) continue;
+
+		// A few in a row: the first packet on a fresh mapping is the one most
+		// likely to be dropped, on either NAT.
+		for(int n = 0; n < 3; n ++)
+			net_session_S -> punch(k -> ip,k -> port);
+
+		k -> next_ms = now + 500;
+		k -> tries ++;
+		}
 }
 
 /*
@@ -2283,11 +2348,21 @@ void mchNetMenuPump(void)
 		while(net_lobby_S -> pop_peer(&p)){
 			if(mchNetHost){
 				// Punch outward so the client's HELLO can get in through
-				// this side's NAT. A few, because the first may be eaten.
-				for(int i = 0; i < 4 && net_session_S; i ++)
-					net_session_S -> punch(p.ip,p.port);
+				// this side's NAT, and remember the endpoint so the knocking
+				// continues while the client is still trying to seat.
+				char ipstr[32];
+
+				netSocketIpToString(p.ip,ipstr,sizeof(ipstr));
+				net_log("lobby host: peer %s:%u, knocking",ipstr,(unsigned)p.port);
+
+				net_lobby_knock_remember(p.ip,p.port);
 			}
 			else {
+				char ipstr[32];
+
+				netSocketIpToString(p.ip,ipstr,sizeof(ipstr));
+				net_log("lobby client: host %s:%u",ipstr,(unsigned)p.port);
+
 				net_lobby_host_ip = p.ip;
 				net_lobby_host_port = p.port;
 				net_lobby_host_known = 1;
@@ -2299,6 +2374,9 @@ void mchNetMenuPump(void)
 		}
 	}
 
+	// Keep knocking at every introduced endpoint until it answers.
+	net_lobby_knock_quant(now);
+
 	// Client: dial the host the server named, retrying until seated.
 	if(net_lobby_mode && !mchNetHost && net_lobby_host_known &&
 	   net_session_S && net_match_S && net_match_S -> local_slot() < 0){
@@ -2309,6 +2387,64 @@ void mchNetMenuPump(void)
 				net_match_S -> open_client(mchNetMenuName[0] ? mchNetMenuName : "player");
 		}
 	}
+
+	// A client that has a slot is in the lobby with everybody else. Logged
+	// once, so a run that never gets there is obvious in the log.
+	if(!mchNetHost && net_match_S && net_match_S -> local_slot() >= 0 && !net_lobby_seated_logged){
+		net_lobby_seated_logged = 1;
+		net_log("lobby client: seated in slot %d",net_match_S -> local_slot());
+		}
+}
+
+/* ------------------------- headless rendezvous test ----------------------- */
+
+/*
+	One frame of the rendezvous path with no menu. Returns 1 once the race may
+	load: the host once at least one client is seated (or a timeout, so a test
+	never hangs), the client once the host's start has arrived. Test
+	scaffolding behind -netlobbyhost / -netlobbyjoin.
+*/
+static int net_lobby_auto_started = 0;
+static unsigned int net_lobby_auto_ms = 0;
+
+int mchNetLobbyAutoQuant(void)
+{
+	if(!net_lobby_auto_started){
+		int sp[3] = { 1,1,1 };
+
+		net_lobby_auto_started = 1;
+		net_lobby_auto_ms = (unsigned int)clocki();
+		mchNumLaps = 5;
+
+		if(mchNetHost)
+			mchNetLobbyServerHost(mchNetLobbyAutoAddr,"host","moonshine",1,sp);
+		else
+			mchNetLobbyServerJoin(mchNetLobbyAutoAddr,"player",1,sp);
+		}
+
+	mchNetMenuPump();
+
+	if(!mchNetHost && mchNetLobbyMatchCount() > 0 && !mchNetLobbyClientJoined())
+		mchNetLobbyBrowseJoin(0);
+
+	mchNetLobbyQuant();
+
+	if(mchNetHost){
+		unsigned int now = (unsigned int)clocki();
+
+		if((net_match_S && net_match_S -> num_players() >= 2) ||
+		   (int)(now - net_lobby_auto_ms) > 8000){
+			mchNetLobbyHostStart();
+			return 1;
+			}
+
+		return 0;
+		}
+
+	if(mchNetLobbyStarted())
+		mchNetLobbyClientArm();
+
+	return mchNetGame && mchNetLobbyStarted();
 }
 
 /* ------------------------------ browse view ------------------------------- */
@@ -2465,6 +2601,8 @@ void mchNetFinit(void)
 	net_lobby_host_known = 0;
 	net_lobby_reg_players = -1;
 	net_lobby_join_id = -1;
+	net_lobby_knock_count = 0;
+	net_lobby_seated_logged = 0;
 
 	net_log("net race end");
 	net_trace_close();
