@@ -151,6 +151,12 @@ extern int mchNetMenu;
 */
 extern int mchNetBots;
 /*
+	mchNetDestroy 1 = the host wrecks two adjacent bot slots a moment after the
+	start, so the destroy-assemble sequence runs in a test with nobody at the
+	keyboard. Set by -netdestroy. Test scaffolding.
+*/
+extern int mchNetDestroy;
+/*
 	mchNetTrace 1 = write a per-tick CSV of every networked object's pose and
 	parameters, next to net.log, so a host and a client trace can be diffed.
 	Set by -netdump. Diagnostic only; costs nothing when off.

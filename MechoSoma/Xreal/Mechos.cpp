@@ -389,8 +389,81 @@ void Mechos::net_apply_state(int state)
 	// checkpoint, teleporting in and reassembling are this class's own machine
 	// and play on their own once it starts; the host's snapshots keep the body
 	// posed while the local parts do their thing.
-	if(state == STAYING_PERSONAGE && state_ == NORMAL_MECHOS)
+	//
+	// The host may be seen for the first time partway through: a client that
+	// connects while a car already lies wrecked, or a snapshot that skips
+	// straight from NORMAL to an assembling state. Any non-NORMAL state on a
+	// still-whole copy means "break it up", not just STAYING_PERSONAGE.
+	// FORMIC_TRANSPORTED_MECHOS is a driving state, not a wreck.
+	if(state == state_)
+		return;
+
+	if(state != NORMAL_MECHOS && state != FORMIC_TRANSPORTED_MECHOS &&
+	   state_ == NORMAL_MECHOS)
 		disorganize();
+}
+
+/*
+	Take the host's parts. A client's assembly pulls in the nearest loose
+	part of each type, and its loose parts scatter on its own RNG, so it can
+	end up with a different set from the host's copy of the same car. The
+	three spell parts carry the arcanes, so a mismatch means the client casts
+	one spell and the host fires another (net_apply_event resolves the cast by
+	part index on the host's car).
+
+	kinds[i] is M3D_KIND(part_by_index(i)->Type), 0 for "no part", the same
+	indexing netRacerState uses. A zero is left as it is: there is nothing to
+	put there. Rebuilt only when something differs, or when this copy is still
+	broken up and the host already has it whole - that is also what finishes
+	an assembly the host has moved on from, instead of the client driving on
+	while its parts fly in.
+*/
+int Mechos::net_sync_parts(const unsigned char* kinds)
+{
+	int Kinds[NUM_PARTS];
+	bool differ = false;
+	int i;
+
+	if(!kinds)
+		return 0;
+
+	for(i = 0; i < NUM_ACTIVE_PARTS; i ++){
+		// The morph/activated bits are a spell's momentary visual, not a
+		// different part; comparing them would rebuild the car on every morph.
+		Kinds[i] = part_by_index(i)
+			? (int)(M3D_KIND(part_by_index(i) -> Type) &
+			        ~(MORPH_KIND | ACTIVATED_KIND))
+			: 1;
+
+		if(kinds[i] && Kinds[i] != kinds[i]){
+			Kinds[i] = kinds[i];
+			differ = true;
+			}
+		}
+
+	if(!differ && state_ == NORMAL_MECHOS)
+		return 0;
+
+	// Loose parts this copy was pulling in must not merge into the rebuilt car
+	// on top of the host's parts; release them to fall as plain debris.
+	for(i = 0; i < NUM_PARTS; i ++){
+		if(attracted_parts[i]){
+			attracted_parts[i] -> targetMechos = 0;
+			attracted_parts[i] = 0;
+			}
+		}
+
+	Kinds[PART_INDEX(M3D_LF_WHEEL)] = Kinds[PART_INDEX(M3D_RF_WHEEL)];
+	Kinds[PART_INDEX(M3D_LB_WHEEL)] = Kinds[PART_INDEX(M3D_RB_WHEEL)];
+
+	xrealM3D -> Delete(geometry);
+	geometry = xrealM3D -> CreateObject(M3D_TOTAL_TYPE(Kinds[0], M3D_ENGINE));
+	geometry -> attachDummyChildren(Kinds);
+	geometry -> SetPosition(Alg(), R() + Alg()*mesh_offset);
+	registerGeometry();
+	make_non_colliding();
+
+	return 1;
 }
 
 Part* Mechos::detachPart(int part_id, int formic)

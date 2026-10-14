@@ -278,6 +278,13 @@ int mchNetAutoDrive = 0;
 */
 int mchNetBots = 0;
 /*
+	-netdestroy: the host wrecks two adjacent bot slots a moment after the
+	start, so the destroy-assemble sequence (and the part sync that follows it)
+	runs in a test with nobody at the keyboard. Test scaffolding, no effect on
+	a normal race.
+*/
+int mchNetDestroy = 0;
+/*
 	-netdump: write a per-tick CSV of every networked object, so a host and a
 	client trace can be aligned on the host tick and compared field by field.
 
@@ -469,6 +476,27 @@ static void net_send_snapshot(void)
 			s -> time_ms = (unsigned int)(rp -> stPtr -> time + rp -> stPtr -> cur_time);
 			s -> nstar = (unsigned short)(rp -> NStar + rp -> stPtr -> NStar);
 			}
+
+			// Which part sits at each index, as M3D_KIND. A car that is
+			// destroyed next to another picks up the nearest loose part on
+			// reassembly, so its three spell parts and the arcanes baked into
+			// them can differ from the ones it started with - and can differ
+			// between the two machines, whose loose parts scatter on their own
+			// RNG. The host owns the car, so it names the parts and every
+			// client rebuilds to match. 0 means "no part": a client leaves
+			// that slot alone, which is also what a broken-up car reports.
+			//
+			// The morph/activated bits are dropped: a spell flips them on and
+			// off for its own visual, they are not a different part, and a
+			// client rebuilding its whole car on every morph would reset the
+			// energy and features registerGeometry() resets.
+			for(int i = 0; i < NET_ACTIVE_PARTS; i ++){
+				cMesh* part = mr -> part_by_index(i);
+
+				if(part)
+					s -> part_kind[i] = (unsigned char)
+						(M3D_KIND(part -> Type) & ~(Mechos::MORPH_KIND | Mechos::ACTIVATED_KIND));
+				}
 
 			// Arcane mana per part. The host is the only machine whose arcane
 			// drains, so this is what both a client bar and a client's own
@@ -788,6 +816,28 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 
 		if(!mr) continue;
 
+		// The destroy-assemble sequence, kicked off on the transition out of
+		// NORMAL. It goes to the local car too: the client drives its own car
+		// but never damages it, so without this it would keep driving through
+		// its own explosion on every other machine.
+		mr -> net_apply_state(racers[i].mech_state);
+
+		/*
+			The host is the authority on which part sits where. Once it says
+			the car is whole again, this copy is put on the host's parts: it
+			may have reassembled from a different set of loose parts, and then
+			its spells and their mana bars would not be the host's. Applied
+			only for a whole car - a broken-up one has no parts to name - and
+			it does nothing when the parts already match.
+
+			Before the mana loop below, so a car this frame rebuilds takes the
+			host's Power and Status on its new parts rather than on the meshes
+			the rebuild throws away.
+		*/
+		if(racers[i].mech_state == Mechos::NORMAL_MECHOS)
+			if(mr -> net_sync_parts(racers[i].part_kind))
+				net_log("client: slot %d parts synced from host",(int)racers[i].slot);
+
 		/*
 			Arcane state goes to every racer, the local one included. A
 			client never runs the arcane process - mchArcaneData::fxlabStart()
@@ -805,12 +855,6 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			part -> arcaneData.Power = net_uq_mana(racers[i].part_power[p],
 							       part -> arcaneData.MaxPower);
 			}
-
-		// The destroy-assemble sequence, kicked off on the transition out of
-		// NORMAL. It goes to the local car too: the client drives its own car
-		// but never damages it, so without this it would keep driving through
-		// its own explosion on every other machine.
-		mr -> net_apply_state(racers[i].mech_state);
 
 		/*
 			The local car is put on the host's pose as soon as a snapshot
@@ -2678,6 +2722,30 @@ void mchNetQuant(void)
 		// where anything is. The actors go the same way, and only from here:
 		// a pass before the match is running would spawn them to nobody.
 		if(net_match_S -> state() == NET_MATCH_RUNNING){
+			// -netdestroy: wreck two adjacent bot slots once, a moment after
+			// the start, so the destroy-assemble path runs unattended. They
+			// die on the same spot and reassemble from the same pile, which is
+			// what makes their parts (and arcanes) mix.
+			if(mchNetDestroy){
+				static unsigned net_destroy_tick = 0;
+
+				if(!net_destroy_tick)
+					net_destroy_tick = net_match_S -> tick() + 120;	// ~3 s
+				else if(net_match_S -> tick() >= net_destroy_tick){
+					net_destroy_tick = 0xffffffffu;
+
+					for(int s = 2; s <= 3; s ++){
+						mchRacer* drp = net_racer_at(s);
+						mchMechosRacer* dmr = drp ? dynamic_cast<mchMechosRacer*>(drp) : NULL;
+
+						if(dmr){
+							dmr -> damage(1000000.0f);
+							net_log("host: -netdestroy wrecked slot %d",s);
+							}
+						}
+					}
+				}
+
 			net_send_snapshot();
 			net_fx_update_actors();
 			}

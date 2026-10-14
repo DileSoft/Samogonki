@@ -162,6 +162,12 @@ int main(int argc, char const *argv[]) {
       if (strcmp(argv[i], "-netbots") == 0) {
           mchNetBots = 1;
       }
+      // -netdestroy makes the host wreck two adjacent bot slots a moment after
+      // the start, so the destroy-assemble sequence and the part sync that
+      // follows it run without anyone at the keyboard. Test scaffolding.
+      if (strcmp(argv[i], "-netdestroy") == 0) {
+          mchNetDestroy = 1;
+      }
       // -networld <id> picks the race world, so a bot test can run on worlds
       // other than the built-in default. Both machines must be given the same.
       if (strcmp(argv[i], "-networld") == 0 && i + 1 < argc) {
