@@ -450,6 +450,7 @@ struct mchRaceDispatcher
 	void initCheckpoints(mchRacer* r);
 	void setCheckpointNStar(mchRacer* r = NULL);
 	int getCheckpointNStar(mchRacer* r = NULL);
+	void net_log_checkpoint_count(const char* why,mchRacer* r,int pl,class mchCheckpoint* cp);
 
 	void GetChpCenterPos(int id,int& x,int& y,int& z);
 	void GetChpCenterPos(mchCheckpoint* p,int& x,int& y,int& z);

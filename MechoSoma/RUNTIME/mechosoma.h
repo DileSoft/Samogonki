@@ -200,6 +200,7 @@ void mchNetLobbySetGameName(const char* name);
 const char* mchNetGameName(void);
 int  mchNetPlayerFigure(int slot);
 int  mchNetRacerHostStanding(const struct mchRacer* r,int& lap,int& checkpoint);
+int  mchNetIsRemoteRacer(const struct mchRacer* r);
 int  mchNetPlayerConfig(int slot,char* out,int sz);
 void mchNetLogGrid(void);
 int  mchNetBotFigure(unsigned int taken_mask);

@@ -399,6 +399,14 @@ static int net_local_stand_lap = 0;
 static int net_local_stand_cp = 0;
 static int net_local_stand_valid = 0;
 
+// A fingerprint of every racer's host standing, so the checkpoint count can be
+// recomputed on the frames the standings actually moved rather than every
+// snapshot. Remote cars no longer advance their own checkpoint on a client
+// (CP_Quant leaves them to the host), so their passes no longer trigger the
+// recompute; this is what does.
+static unsigned net_stand_fingerprint = 0;
+static int net_stand_dirty = 0;
+
 // Per slot, whether the horn was held last tick. The host plays one beep per
 // press, so the relay has to fire on the rising edge too.
 static int net_horn_last[NET_MAX_PLAYERS];
@@ -753,6 +761,21 @@ int mchNetRacerHostStanding(const mchRacer* r,int& lap,int& checkpoint)
 }
 
 /*
+	A car this client only poses: everything but its own. A remote car's lap
+	and checkpoint arrive in the snapshot, and the client must not count its
+	line crossings itself - its own count would be overwritten by the next
+	snapshot and the two standings would flicker against each other. See
+	CP_Quant, which leaves remote cars to the host.
+*/
+int mchNetIsRemoteRacer(const mchRacer* r)
+{
+	if(mchNetHost || !mchNetGame || !net_match_S) return 0;
+	if(net_match_S -> local_slot() < 0) return 0;
+
+	return r != net_racer_at(net_match_S -> local_slot());
+}
+
+/*
 	Client side: correct the locally simulated car when it has really come off
 	the host's copy.
 
@@ -1013,6 +1036,23 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 				    Vect3f(net_uq_speed(racers[i].vel_x),
 					   net_uq_speed(racers[i].vel_y),
 					   (float)racers[i].vel_z));
+		}
+
+	// On a client, note when the host's standings moved at all. The checkpoint
+	// count is recomputed from these, and remote cars no longer trigger it
+	// with a pass of their own (CP_Quant leaves them to the host), so this is
+	// what does.
+	if(!mchNetHost){
+		unsigned fp = 0;
+
+		for(int i = 0; i < count; i ++)
+			fp = fp * 131u + (unsigned)racers[i].lap * 37u
+			   + (unsigned)racers[i].checkpoint;
+
+		if(fp != net_stand_fingerprint){
+			net_stand_fingerprint = fp;
+			net_stand_dirty = 1;
+			}
 		}
 
 	// -netdump: this machine's world after the snapshot was applied. The
@@ -2405,6 +2445,8 @@ void mchNetFinit(void)
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
 	net_local_stand_valid = 0;
+	net_stand_fingerprint = 0;
+	net_stand_dirty = 0;
 	memset(net_horn_last,0,sizeof(net_horn_last));
 	net_input_sent_count = 0;
 	net_input_recv_count = 0;
@@ -2868,6 +2910,17 @@ void mchNetQuant(void)
 
 	if(!mchNetHost && net_client_ready)
 		net_send_client_input();
+
+	// The host's standings moved, so the stars on the checkpoint the local car
+	// is heading to may have changed. Remote cars do not drive this any more
+	// (their own pass on a client is not simulated), so it is done here, once
+	// per change rather than once per snapshot.
+	if(!mchNetHost && net_stand_dirty){
+		net_stand_dirty = 0;
+
+		if(mch_raceD && mch_raceD -> activeRacer)
+			mch_raceD -> setCheckpointNStar();
+		}
 
 	/*
 		A net race cannot be paused, by VK_PAUSE or by anything else.

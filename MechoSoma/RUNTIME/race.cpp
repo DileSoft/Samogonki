@@ -1388,9 +1388,20 @@ void mchRaceDispatcher::setActiveRacer(mchRacer* p,int cnt_flag,int player)
 	}
 
 
+// Defined by the checkpoint code below; needed here to rank a client's own
+// car by the host's Lap/Checkpoint.
+static void racer_stand(const mchRacer* p,int& lap,int& checkpoint);
+
 int mchRaceDispatcher::CheckRacerPlace(mchRacer* p,mchRacer* p1)
 {
 	int i,flag = 0;
+	int plap,pcp,p1lap,p1cp;
+
+	// Rank by the host's Lap/Checkpoint for a client's own car, whose local
+	// count can sit a checkpoint off; see racer_stand.
+	racer_stand(p,plap,pcp);
+	racer_stand(p1,p1lap,p1cp);
+
 	if((p -> flags & MCH_FINISHED) && (p1 -> flags & MCH_FINISHED) && p -> stPtr -> time < p1 -> stPtr -> time){
 		SWITCH_OBJ;
 	}
@@ -1400,16 +1411,16 @@ int mchRaceDispatcher::CheckRacerPlace(mchRacer* p,mchRacer* p1)
 			SWITCH_OBJ;
 		}
 		else {
-			if(p -> stPtr -> Lap > p1 -> stPtr -> Lap){
+			if(plap > p1lap){
 				SWITCH_OBJ;
 			}
 			else {
-				if(p -> stPtr -> Lap == p1 -> stPtr -> Lap){
-					if(p -> stPtr -> Checkpoint > p1 -> stPtr -> Checkpoint){
+				if(plap == p1lap){
+					if(pcp > p1cp){
 						SWITCH_OBJ;
 					}
 					else {
-						if(!(p -> flags & MCH_FINISHED) && !(p1 -> flags & MCH_FINISHED) && p -> stPtr -> Checkpoint == p1 -> stPtr -> Checkpoint){
+						if(!(p -> flags & MCH_FINISHED) && !(p1 -> flags & MCH_FINISHED) && pcp == p1cp){
 							if(p -> last_trackP && p1 -> last_trackP && p -> last_trackP -> owner == p1 -> last_trackP -> owner && p -> last_trackP -> get_dist() < p1 -> last_trackP -> get_dist()){
 								SWITCH_OBJ;
 							}
@@ -1426,6 +1437,11 @@ int mchRaceDispatcher::CheckRacerPlace(mchRacer* p,mchRacer* p1)
 int mchRaceDispatcher::CheckRacerPlaceHS(mchRacer* p,mchRacer* p1)
 {
 	int i,flag = 0;
+	int plap,pcp,p1lap,p1cp;
+
+	racer_stand(p,plap,pcp);
+	racer_stand(p1,p1lap,p1cp);
+
 	if((p -> flags & MCH_FINISHED) && (p1 -> flags & MCH_FINISHED)){
 		if(p -> stPtr -> time < p1 -> stPtr -> time){
 			SWITCH_OBJ;
@@ -1442,16 +1458,16 @@ int mchRaceDispatcher::CheckRacerPlaceHS(mchRacer* p,mchRacer* p1)
 			SWITCH_OBJ;
 		}
 		else {
-			if(p -> stPtr -> Lap > p1 -> stPtr -> Lap){
+			if(plap > p1lap){
 				SWITCH_OBJ;
 			}
 			else {
-				if(p -> stPtr -> Lap == p1 -> stPtr -> Lap){
-					if(p -> stPtr -> Checkpoint > p1 -> stPtr -> Checkpoint){
+				if(plap == p1lap){
+					if(pcp > p1cp){
 						SWITCH_OBJ;
 					}
 					else {
-						if(!(p -> flags & MCH_FINISHED) && !(p1 -> flags & MCH_FINISHED) && p -> stPtr -> Checkpoint == p1 -> stPtr -> Checkpoint){
+						if(!(p -> flags & MCH_FINISHED) && !(p1 -> flags & MCH_FINISHED) && pcp == p1cp){
 							if(p -> last_trackP && p1 -> last_trackP && p -> last_trackP -> owner == p1 -> last_trackP -> owner && p -> last_trackP -> get_dist() < p1 -> last_trackP -> get_dist()){
 								SWITCH_OBJ;
 							}
@@ -3052,7 +3068,13 @@ void mchRaceDispatcher::CP_Quant(void)
 {
 	mchRacer* p = racerLst -> first();
 	while(p){
-		CP_Quant(p);
+		// A client only poses remote cars: their crossings arrive in the
+		// snapshot, and a second count made here was overwritten by the next
+		// snapshot, so the two standings fought and the checkpoint stars
+		// flickered. The local car keeps its own count - that is what plays
+		// its pass animation - and is ranked by the host's numbers instead.
+		if(!mchNetIsRemoteRacer(p))
+			CP_Quant(p);
 		switch(p -> State()){
 			case NormalRacer:
 				break;
@@ -3179,6 +3201,12 @@ void mchRaceDispatcher::CP_Quant(mchRacer* p)
 				mchA_DropCPDisable(p);
 			}
 			setCheckpointNStar();
+
+			if(mchNetGame)
+				mchNetWriteLog("%s pass: p=%d active=%d -> L%d C%d",
+					mchNetHost ? "host" : "client",p -> ID,
+					(p -> flags & MCH_ACTIVE_RACER) ? 1 : 0,
+					p -> stPtr -> Lap,p -> stPtr -> Checkpoint);
 		}
 	}
 }
@@ -3700,6 +3728,42 @@ static void racer_stand(const mchRacer* p,int& lap,int& checkpoint)
 	mchNetRacerHostStanding(p,lap,checkpoint);
 }
 
+/*
+	Net diagnostics for the checkpoint stars, to net-host.log / net-client.log.
+	A checkpoint shows ChStarMAX - (racers strictly ahead in Lap/Checkpoint)
+	stars, so this prints everything that decides that number: the racer the
+	count is for, its own and the host's Lap/Checkpoint, each racer's ranked
+	Lap/Checkpoint and place, and the count written to the checkpoint. The log
+	is append-only, so the order of the lines is the order of the events.
+*/
+void mchRaceDispatcher::net_log_checkpoint_count(const char* why,mchRacer* r,int pl,mchCheckpoint* cp)
+{
+	char buf[1024];
+	int n = 0,slot = 0;
+	mchRacer* p;
+
+	if(!mchNetGame || !r || !r -> stPtr) return;
+
+	n += sprintf(buf + n,"%s %s: r=%d L%d C%d place=%d cp=%d nstar=%d pl=%d |",
+		mchNetHost ? "host" : "client",why,r -> ID,
+		r -> stPtr -> Lap,r -> stPtr -> Checkpoint,r -> stPtr -> place,
+		cp ? cp -> ID : -1,cp ? cp -> NStar : -1,pl);
+
+	p = racerLst -> first();
+	while(p && n < 850){
+		int lp,lc;
+
+		racer_stand(p,lp,lc);
+
+		n += sprintf(buf + n," s%d:L%d C%d p%d%s",slot,lp,lc,
+			p -> stPtr ? p -> stPtr -> place : -1,p == r ? "*" : "");
+		p = p -> next;
+		slot ++;
+	}
+
+	mchNetWriteLog(buf);
+}
+
 void mchRaceDispatcher::setCheckpointNStar(mchRacer* r)
 {
 	int pl = 0,rl,rc;
@@ -3729,6 +3793,8 @@ void mchRaceDispatcher::setCheckpointNStar(mchRacer* r)
 		cp -> NStar = cp -> ChStarMAX - pl;
 		if(cp -> NStar < 0 || !cp -> ID) cp -> NStar = 0;
 		cp -> set_state(MCH_CP_CURRENT,r/*,1 Only for change ActivePlayer in HotSeat Mode*/);	}
+
+	net_log_checkpoint_count("setNStar",r,pl,cp);
 }
 
 int mchRaceDispatcher::getCheckpointNStar(mchRacer* r)
