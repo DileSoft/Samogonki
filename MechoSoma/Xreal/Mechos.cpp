@@ -1913,6 +1913,17 @@ int Mechos::acceleration_spot_quant()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int Mechos::startRotation(float angle, float speed)
 {
+	/*
+		A net client does not own its cars' poses: the host's snapshot carries
+		them, spin included. Starting a spin here only fights that snapshot,
+		and because the turn direction comes from the local RNG the two can
+		turn opposite ways - the accumulated angle never reaches the target
+		and the car jerks on the spot forever, with the camera chasing it.
+		The host runs the spin; the client shows it through the snapshots.
+	*/
+	if(mchNetGame && !mchNetHost)
+		return 0;
+
 	if(features() & ROTATING)
 		return 0;
 	features_ |= ROTATING;

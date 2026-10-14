@@ -139,6 +139,12 @@ extern int mchNetHost;
 extern int mchNetRaceAuto;
 extern int mchNetAutoDrive;
 /*
+	mchNetMenu 1 = the in-race Escape menu is up over a live net race. While it
+	is, the race and the session keep running, and the menu's regular actions -
+	quit, restart, abort - must not free the world under them.
+*/
+extern int mchNetMenu;
+/*
 	mchNetBots 1 = the client's own car is a bot whose steering travels to the
 	host as an ordinary input sample; on the host its own car and spare slots
 	are bots too. Set by -netbots. Test scaffolding.

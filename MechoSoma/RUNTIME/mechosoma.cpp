@@ -1076,10 +1076,18 @@ int GameQuantRTO::Quant(void)
 
 		if(mchNetMenu){
 			mret = acsScrD -> Quant();
+
 			acsScrD -> RedrawQuant();
 
-			if(mret == -1)
-				quantRTO -> NextID = XT_TERMINATE_ID;
+			if(mret == -1){
+				// The menu's "exit": leave the session and the race for the
+				// main menu. Going through the RTO's Finit runs mchNetFinit,
+				// the same clean teardown the single-player exit uses.
+				mchNetMenu = 0;
+				acsFinit();
+				XGR_MouseSetMoveHandler(mchMouseMove);
+				quantRTO -> NextID = RTO_MAIN_MENU_ID;
+				}
 			else if(mret != 0){
 				// Anything else is an action that would restart or replace
 				// the race, which a live session cannot do. Close and stay.

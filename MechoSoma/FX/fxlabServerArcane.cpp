@@ -190,7 +190,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 					v += dv;
 					v.z = fxlabGetLevel(v.x,v.y,v.z + owner->radius());
 
-					t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_OBJECT_SET);
+					t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_OBJECT_SET,owner_id,arcane_id);
 					t->SetStartTime(fxlabClientD->GetTime());
 					t->SetKeyID(FXLAB_ID_KEY_ROSE_FIRE_SET);
 					t->SetPosition(v);
@@ -208,7 +208,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 			Position.z = fxlabGetLevel(XCYCL(round(Position.x)),YCYCL(round(Position.y)),owner->R().z + owner->radius());
 			fxlabGetArcanePosition(owner,Vect3f(0,owner->radius()*1.5f,0),Position);
 
-			t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SLIME_MODEL);
+			t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_SLIME_MODEL,owner_id,arcane_id);
 			t->SetStartTime(fxlabClientD->GetTime());
 			t->SetKeyID(FXLAB_ID_KEY_RAGE_SLIME_MODEL);
 			t->SetPosition(Position);
@@ -248,7 +248,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 					CYCLE(v);
 					v.z = fxlabGetLevel(v.x,v.y,v.z + owner->radius()) + 10.0f;
 
-					t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_LASH_MODEL);
+					t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_LASH_MODEL,owner_id,arcane_id);
 					t->SetStartTime(fxlabClientD->GetTime());
 					t->SetKeyID(FXLAB_ID_KEY_FURY_FUNGUS_LASH);
 					t->SetPosition(v);
@@ -259,7 +259,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 				CYCLE(v);
 				v.z = fxlabGetLevel(v.x,v.y,v.z + owner->radius());
 
-				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_SPARK_GENERATOR);
+				t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_SPARK_GENERATOR,owner_id,arcane_id);
 				t->SetStartTime(fxlabClientD->GetTime());
 				t->SetKeyID(FXLAB_ID_KEY_FURY_FUNGUS_FOG);
 				t->SetPosition(v);
@@ -307,7 +307,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 				v += owner->Zglobal();
 				v.Normalize(40.0f);
 
-				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_BULLET_FIRE_MODEL);
+				t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_BULLET_FIRE_MODEL,owner_id,arcane_id);
 				t->SetStartTime(fxlabClientD->GetTime());
 				t->SetKeyID(FXLAB_ID_KEY_FIRE_BULLET_MODEL);
 				t->SetPosition(Position);
@@ -547,7 +547,7 @@ void fxlabClientArcaneStart(int arcane_id,int owner_id)
 				v += owner->Zglobal();
 				v.Normalize(40.0f);
 
-				t = fxlabClientD->CreateObject(FXLAB_CLIENT_PROCESS_BULLET_SNOW_MODEL);
+				t = fxlabClientArcaneNew(FXLAB_CLIENT_PROCESS_BULLET_SNOW_MODEL,owner_id,arcane_id);
 				t->SetStartTime(fxlabClientD->GetTime());
 				t->SetKeyID(FXLAB_ID_KEY_SNOW_BULLET_MODEL);
 				t->SetPosition(Position);

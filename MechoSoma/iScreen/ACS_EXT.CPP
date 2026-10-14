@@ -971,6 +971,14 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 			acsInitControls();
 			break;
 		case ACS_EXT_QUIT:
+			// Over the live net menu, "exit" is the net menu's own signal. It
+			// must not swap the screen out from under the running race; -1
+			// tells the in-race handler in mechosoma.cpp to leave cleanly.
+			if(mchNetMenu){
+				acsScrD -> QuantCode = -1;
+				break;
+			}
+
 			acsInitSaveSlots();
 			if(acsNumSaves < 1)
 				acsScrD -> PrepareChangeScreen(ACS_MAIN_MENU_SCR0);
@@ -1041,6 +1049,10 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 			mchInitRacers();
 			break;
 		case ACS_EXT_ABORT_RACE:
+			// Over the in-race net menu the world is still live; freeing and
+			// resetting it here would pull it out from under the running race.
+			if(mchNetMenu) break;
+
 			mchResetRacers();
 			mchFreeResources(1);
 			acsStack -> Clear();
@@ -1119,6 +1131,10 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 			acsScrD -> PrepareChangeScreen(acsStack -> Get());
 			break;
 		case ACS_EXT_FREE_RESOURCES:
+			// The net in-race menu reuses these screens; freeing the world on
+			// its "exit" would leave the still-running race on dead data.
+			if(mchNetMenu) break;
+
 			mchFreeResources();
 			break;
 		case ACS_EXT_CHOOSE_WORLD:

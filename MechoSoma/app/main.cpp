@@ -91,6 +91,13 @@ namespace {
             }
 
             if (xtNeedExit()) {
+                // Closing the window while a net race is live: take the
+                // session down first, so the socket closes and the peer hears
+                // the leave instead of the process just vanishing.
+                if (mchNetGame) {
+                    mchNetFinit();
+                    mchNetGame = 0;
+                }
                 ErrH.Exit();
             }
         } else {

@@ -135,7 +135,10 @@
 (она вешает метку owner/arcane) — иначе `fxlabClientArcaneStop` его не найдёт.
 ShiftTrap (048, телепорт-ловушка) и MassShifter (058) создавались напрямую через
 `fxlabClientD->CreateObject()` и потому «висели» на клиенте после срабатывания;
-исправлено.
+исправлено. Тем же дефектом страдали FireGarden (003, розы огня — «огненная
+стена»), RageSlime (004, слизень), FuryFungus (005, плети+туман), FireStone (024)
+и SnowFall (064, снаряд): их длительные модели тоже создавались напрямую и не
+снимались — переведены на `fxlabClientArcaneNew()`.
 
 Бонус-арканы (`fxlabBonusEvent`, не «кастуются» с части): **053** EnergyCharge,
 **054** Jump, **055** Nitro, **062** SpellCharge, **063** AddStars, **067**
