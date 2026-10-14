@@ -26,6 +26,7 @@ protected:
 	unsigned int disable_traction_modulation : 1; // Как расстоянием от семени до семени, так и внешним АИ
 	unsigned int ignore_point_control : 1;
 	unsigned int net_controlled : 1; // Управление приходит пакетами, а не с клавиатуры // Для лягушки, которая прыгает по кувшинкам
+	unsigned int bot_input : 1; // Тест: здесь решает AI, а применяет сетевой путь
 
 	// Control points ///////
 	float traction_modulation; // 0..2, по умолчанию 1  
@@ -48,6 +49,8 @@ protected:
 
 	// Network
 	netInput net_input;	// последний полученный ввод, читается в control()
+	float bot_rudder;	// последнее решение AI, уходит по сети и применяется net_control
+	float bot_traction;
 
 	// Curvature
 	float required_curvature;
@@ -84,6 +87,17 @@ public:
 	void set_net_input(const netInput& in) { net_input = in; net_controlled = 1; }
 	const netInput& get_net_input() const { return net_input; }
 	int is_net_controlled() const { return net_controlled; }
+
+	/*
+		Test scaffolding: a client-side bot. The AI still decides here, but its
+		output is captured instead of applied, and both this machine and the
+		host apply it through net_control - the same path a player's packet
+		takes. See net_game.cpp, -netbots.
+	*/
+	void set_bot_input(int on){ bot_input = on ? 1 : 0; if(on) net_controlled = 1; }
+	int is_bot_input() const { return bot_input; }
+	void get_bot_decision(float& rudder_out,float& traction_out) const
+		{ rudder_out = bot_rudder; traction_out = bot_traction; }
 	virtual void net_control(const netInput& input);
 	void show() const;
 

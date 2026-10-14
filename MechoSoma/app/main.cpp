@@ -7,6 +7,7 @@
 #include "filesystem.h"
 
 #include <cstdio>
+#include <cstdlib>
 
 #ifdef EMSCRIPTEN
 #include <emscripten.h>
@@ -147,6 +148,17 @@ int main(int argc, char const *argv[]) {
       // the client-sends / host-applies input path with no keyboard involved.
       if (strcmp(argv[i], "-netdrive") == 0) {
           mchNetAutoDrive = 1;
+      }
+      // -netbots runs the client's own car as a bot and sends its steering to
+      // the host as an ordinary input sample; on the host its own car and the
+      // spare slots are bots too. Test scaffolding, no keyboard needed.
+      if (strcmp(argv[i], "-netbots") == 0) {
+          mchNetBots = 1;
+      }
+      // -networld <id> picks the race world, so a bot test can run on worlds
+      // other than the built-in default. Both machines must be given the same.
+      if (strcmp(argv[i], "-networld") == 0 && i + 1 < argc) {
+          mchNetMenuWorld = atoi(argv[i + 1]);
       }
       // -netdump writes a per-tick CSV of all networked objects (racers and
       // replicated bodies) so a host trace and a client trace can be compared.

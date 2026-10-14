@@ -139,6 +139,12 @@ extern int mchNetHost;
 extern int mchNetRaceAuto;
 extern int mchNetAutoDrive;
 /*
+	mchNetBots 1 = the client's own car is a bot whose steering travels to the
+	host as an ordinary input sample; on the host its own car and spare slots
+	are bots too. Set by -netbots. Test scaffolding.
+*/
+extern int mchNetBots;
+/*
 	mchNetTrace 1 = write a per-tick CSV of every networked object's pose and
 	parameters, next to net.log, so a host and a client trace can be diffed.
 	Set by -netdump. Diagnostic only; costs nothing when off.

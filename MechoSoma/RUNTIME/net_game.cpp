@@ -14,6 +14,7 @@
 
 #include "mechosoma.h"
 #include "race.h"
+#include "TrackDispatcher.h"
 #include "Mechos.h"
 #include "arcane.h"
 #include "BodyDispatcher.h"
@@ -252,6 +253,23 @@ int mchNetRaceAuto = 0;
 	Test scaffolding, no effect on a normal race.
 */
 int mchNetAutoDrive = 0;
+/*
+	-netbots: run the client's own car as a bot, driven by the same AI the
+	host uses for its spare slots, but with the AI's steering sent to the host
+	as an ordinary input sample.
+
+	The AI decides locally; point_control() output is captured instead of
+	applied (see PointControlledObject::control), and both this machine and
+	the host then apply it through net_control. That is what makes the bot's
+	actions travel over the same INPUT message a player's would, and keeps the
+	client's local copy and the host's copy on one code path.
+
+	The host's own car and its spare slots are driven by its AI directly; only
+	a seated client's car needs the round trip, so -netbots on both machines
+	leaves a field of bots with the client's one transmitting. Test
+	scaffolding, no effect on a normal race.
+*/
+int mchNetBots = 0;
 /*
 	-netdump: write a per-tick CSV of every networked object, so a host and a
 	client trace can be aligned on the host tick and compared field by field.
@@ -2334,9 +2352,18 @@ static void net_update_ai(void)
 	rp = mch_raceD -> racerLst -> first();
 
 	while(rp){
-		if(slot != NET_SLOT_HOST){
+		int ai = (rp -> flags & MCH_AI) != 0;
+
+		if(slot == NET_SLOT_HOST){
+			// The host's own car is keyboard driven unless -netbots asks for
+			// an unattended field, in which case it is a bot too.
+			if(mchNetBots){
+				if(!ai) mch_raceD -> AI_Toggle(rp,1);
+				rp -> set_net_control(0);
+				}
+			}
+		else {
 			int taken = net_match_S -> player(slot).is_present;
-			int ai = (rp -> flags & MCH_AI) != 0;
 
 			/*
 				AI_Toggle() flips the flag, it does not set it: AI_Toggle(p,1)
@@ -2388,19 +2415,36 @@ static void net_send_client_input(void)
 	rp = net_racer_at(net_match_S -> local_slot());
 	if(!rp) return;
 
-	mechos = dynamic_cast<mchMechosRacer*>(rp);
-	if(!mechos) return;
-
 	memset(&in,0,sizeof(in));
-	mechos -> read_input(in);
-	in.tick = net_match_S -> tick();
 
-	// -netdrive: pretend the player is holding down forward and turning. The
-	// route to the host is exactly the real one from here on.
-	if(mchNetAutoDrive){
-		in.traction = 127;
-		in.rudder = 48;
+	if(mchNetBots){
+		// Test scaffolding: the sample is the AI's decision, captured by
+		// control() this frame. Sending it and applying it through
+		// set_net_input() is exactly what a player's input does, so the host
+		// reproduces the bot's driving from the packet alone.
+		float br,bt;
+
+		rp -> get_bot_decision(br,bt);
+		in.traction = net_input_quantize(bt);
+		in.rudder = net_input_quantize(br);
+
+		rp -> set_net_input(in);
 		}
+	else {
+		mechos = dynamic_cast<mchMechosRacer*>(rp);
+		if(!mechos) return;
+
+		mechos -> read_input(in);
+
+		// -netdrive: pretend the player is holding down forward and turning.
+		// The route to the host is exactly the real one from here on.
+		if(mchNetAutoDrive){
+			in.traction = 127;
+			in.rudder = 48;
+			}
+		}
+
+	in.tick = net_match_S -> tick();
 
 	bytes = net_match_S -> build_input(payload,sizeof(payload),in);
 	if(bytes > 0)
@@ -2574,35 +2618,44 @@ void mchNetQuant(void)
 		}
 
 	if(!mchNetHost && net_match_S -> local_slot() >= 0 && !net_client_ready){
-		mchRacer* rp = net_racer_at(net_match_S -> local_slot());
+		int local = net_match_S -> local_slot();
+		mchRacer* rp = net_racer_at(local);
 		int slot = 0;
 
 		net_client_ready = 1;
 
-		net_log("client: assigned slot %d",net_match_S -> local_slot());
+		net_log("client: assigned slot %d",local);
 
-		// The client drives its own slot and nothing else, so the AI has to
-		// let go of just that one. setActiveRacer also points the camera and
-		// the control config at it.
-		if(rp){
-			mch_raceD -> AI_Toggle(rp,0);
+		// The client drives its own slot and nothing else. setActiveRacer also
+		// points the camera and the control config at it.
+		if(rp)
 			mch_raceD -> setActiveRacer(rp);
-			}
 
 		/*
 			Every remote racer is pose-driven from the host and marked
 			net-controlled so its own physics does not also steer it - two
 			simulators on one car is jitter and a pose that disagrees with the
-			host. The local car is the exception: it is simulated here, from
-			the keyboard, and only checked against the host once a second.
+			host. The local car is otherwise simulated here from the keyboard.
+
+			With -netbots the local car is the exception the other way: it runs
+			the AI to decide (AI_Toggle on, seeds kept), but its steering is
+			captured and sent as an input sample, then applied through
+			net_control on both machines. See net_send_client_input.
 		*/
 		rp = mch_raceD -> racerLst -> first();
 
 		while(rp){
-			mch_raceD -> AI_Toggle(rp,0);
+			if(mchNetBots && slot == local){
+				if(!(rp -> flags & MCH_AI))
+					mch_raceD -> AI_Toggle(rp,1);
+				rp -> set_bot_input(1);
+				}
+			else {
+				mch_raceD -> AI_Toggle(rp,0);
 
-			if(slot != net_match_S -> local_slot())
-				rp -> set_net_control(1);
+				if(slot != local)
+					rp -> set_net_control(1);
+				}
 
 			rp = rp -> next;
 			slot ++;
@@ -2637,6 +2690,9 @@ void mchNetQuant(void)
 	   net_match_S -> ms_until_start() <= 0 &&
 	   mchTimeMode != MCH_TIME_RUNNING){
 		net_log("start tick %u reached, time running",net_match_S -> start_tick());
+		net_log("%s: race world %d \"%s\"",
+			mchNetHost ? "host" : "client",mchCurrentWorld,
+			mch_trackD ? mch_trackD -> TrackName(mchCurrentWorld,0) : "?");
 
 		mchSetTimeMode(MCH_TIME_RUNNING);
 		mchNetStatusText = "Racing";

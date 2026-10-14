@@ -29,6 +29,9 @@ PointControlledObject::PointControlledObject()
 	disable_traction_modulation = 0;
 	ignore_point_control = 0;
 	net_controlled = 0;
+	bot_input = 0;
+	bot_rudder = 0;
+	bot_traction = 0;
 	do_brake = 0;
 	controled_only_by_point = 0;
 	enable_joystick_control = 0;
@@ -368,7 +371,26 @@ void PointControlledObject::control()
 	// Inside the enable_control guard, not above it: a vehicle with control
 	// switched off must not move, whatever the source of the input.
 	if(enable_control)
-		if(num_control_points()){
+		if(bot_input){
+			/*
+				Test scaffolding. The AI still decides: point_control() runs and
+				advances the seeds and the stop/backward timers. But its output
+				is only captured, never applied. Both this machine and the host
+				then apply the captured sample through net_control - the path a
+				player's packet takes - so the two copies stay identical.
+			*/
+			if(num_control_points()){
+				float sr = rudder, st = traction, sb = brake;
+
+				point_control();
+				bot_rudder = rudder;
+				bot_traction = curr_traction;
+
+				rudder = sr; traction = st; brake = sb;
+				}
+			net_control(net_input);
+			}
+		else if(num_control_points()){
 			#ifndef _FINAL_VERSION_
 				if(disable_point_control)
 					return;

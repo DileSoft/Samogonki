@@ -54,6 +54,8 @@ param(
     [string] $JoinAddr        = '127.0.0.1',
     [switch] $Gdb,
     [switch] $Dump,
+    [switch] $Bots,
+    [int]    $World           = -1,
     [string] $GdbExe          = 'C:/msys64/ucrt64/bin/gdb.exe',
     [string] $ExeName         = 'moonshine-runners.exe'
 )
@@ -163,7 +165,7 @@ foreach ($f in @($HostLog,$ClientLog,$HostOut,$ClientOut)) { Remove-Item $f -For
 
 Note "bin   $BinDir"
 Note "out   $OutDir"
-Note "mode  $(if ($Gdb) { 'gdb' } else { 'direct' })"
+Note "mode  $(if ($Gdb) { 'gdb' } else { 'direct' })$(if ($Bots) { ' +bots' })$(if ($World -ge 0) { " world $World" })"
 if ($Gdb) {
     foreach ($need in @($GdbExe, (Join-Path $ToolsDir 'gdb-net-host.gdb'), (Join-Path $ToolsDir 'gdb-net-client.gdb'))) {
         if (-not (Test-Path $need)) { throw "gdb mode needs $need" }
@@ -175,13 +177,32 @@ $clientProc = $null
 
 try {
     # 1. Host up and into the race.
-    $hostProc = Start-Target 'host' (New-Args @('-nethost','-netrace')) 'gdb-net-host.gdb' $HostOut
+    $hostExtra   = @('-nethost','-netrace')
+    $clientExtra = @('-netjoin',$JoinAddr,'-netrace')
+
+    if ($Bots) {
+        # -netbots: the client's own car is a bot whose steering travels to the
+        # host as a normal input sample. -netdrive is the fixed-setpoint stand
+        # in and is dropped in this mode.
+        $hostExtra   += '-netbots'
+        $clientExtra += '-netbots'
+    }
+    else {
+        $clientExtra += '-netdrive'
+    }
+
+    if ($World -ge 0) {
+        $hostExtra   += @('-networld', "$World")
+        $clientExtra += @('-networld', "$World")
+    }
+
+    $hostProc = Start-Target 'host' (New-Args $hostExtra) 'gdb-net-host.gdb' $HostOut
     if (-not (Wait-Log $HostLog 'net race start, host' $StartTimeoutSec)) {
         Fail "host never reached the race (no 'net race start, host' in $StartTimeoutSec s)"
     } else { Ok 'host entered the race' }
 
     # 2. Client up and into the race.
-    $clientProc = Start-Target 'client' (New-Args @('-netjoin',$JoinAddr,'-netrace','-netdrive')) 'gdb-net-client.gdb' $ClientOut
+    $clientProc = Start-Target 'client' (New-Args $clientExtra) 'gdb-net-client.gdb' $ClientOut
     if (-not (Wait-Log $ClientLog 'net race start, client' $StartTimeoutSec)) {
         Fail "client never reached the race (no 'net race start, client' in $StartTimeoutSec s)"
     } else { Ok 'client entered the race' }
@@ -223,10 +244,10 @@ try {
     if ($hostSawEntities)   { Ok 'host reported live entities' }   else { Fail 'host reported no live entities during the race' }
     if ($clientSawEntities) { Ok 'client reported live entities' } else { Fail 'client reported no live entities during the race' }
 
-    # 6. The field is actually driving. The host has to see the client's car
-    #    move too (-netdrive steers it), which is the only end-to-end proof that
-    #    client input reaches the host and is applied there.
-    foreach ($side in @(@('host', $HostLog, 4), @('client', $ClientLog, 3))) {
+    # 6. The field is actually driving. With -netbots every racer is a bot.
+    $hostWant   = if ($Bots) { 5 } else { 4 }
+    $clientWant = if ($Bots) { 5 } else { 3 }
+    foreach ($side in @(@('host', $HostLog, $hostWant), @('client', $ClientLog, $clientWant))) {
         $name = $side[0]; $log = $side[1]; $want = $side[2]; $moved = -1
         if (Test-Path $log) {
             $line = Get-Content $log -ErrorAction SilentlyContinue |
