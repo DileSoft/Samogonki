@@ -68,9 +68,12 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // the mesh to build. Version 10 added the lobby: netHello and netRosterEntry
 // carry the player's mechos (figure plus three spell part ids), and
 // netRosterHeader carries the host's game name, so everybody sees who has
-// joined and what they are driving before the race loads. A peer of another
-// version is refused in the handshake rather than read with the wrong layout.
-const unsigned int NET_PROTO_VERSION	= 10;
+// joined and what they are driving before the race loads. Version 11 added
+// netSpawn::protect_ms, the owner protection an owned class B body is born
+// with, so the client's copy does not treat its own caster as a target. A peer
+// of another version is refused in the handshake rather than read with the
+// wrong layout.
+const unsigned int NET_PROTO_VERSION	= 11;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -496,6 +499,13 @@ struct netSpawn
 	// the body looks and steers like. The mesh-built ones ignore this: their
 	// orientation falls out of the shared physics.
 	unsigned short yaw;
+
+	// Remaining owner protection, milliseconds, 0 when the body has no owner.
+	// An owned body damages itself on any mechos but its owner, and the
+	// protection expires; without the remaining time the client's copy would
+	// become unowned on its own schedule and destroy itself (LittleSpider) or
+	// break its own crystal long before the host's does.
+	unsigned short protect_ms;
 };
 
 // model_id must be the resolved id, never the noise range: fxlabCreateBolide

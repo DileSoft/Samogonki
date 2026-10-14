@@ -805,8 +805,8 @@ static int net_test_spawn(FILE* f)
 
 	// Wire sizes. Packed, or the memcpy would ship padding and two builds of
 	// the same code would disagree on how long a spawn is.
-	if(sizeof(netSpawn) != 29 || sizeof(netSpawnHeader) != 5){
-		net_logf(f,"FAIL sizeof spawn %u/%u, expected 29/5",
+	if(sizeof(netSpawn) != 31 || sizeof(netSpawnHeader) != 5){
+		net_logf(f,"FAIL sizeof spawn %u/%u, expected 31/5",
 			(unsigned)sizeof(netSpawn),(unsigned)sizeof(netSpawnHeader));
 		ok = 0;
 		}

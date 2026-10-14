@@ -73,6 +73,7 @@ static unsigned short net_fx_next_id = 1;
 static netSession* net_fx_sess = NULL;
 
 static netSpawn net_fx_spawn_q[NET_MAX_SPAWN_PER_PACKET];
+static Body* net_fx_spawn_body[NET_MAX_SPAWN_PER_PACKET];
 static int net_fx_spawn_q_count = 0;
 static netDespawn net_fx_despawn_q[NET_MAX_DESPAWN_PER_PACKET];
 static int net_fx_despawn_q_count = 0;
@@ -101,6 +102,7 @@ static void net_fx_flush_spawn(void);
 static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link);
 static void net_fx_pending_drain(void);
 static int net_fx_body_type(const char* name);
+static int net_fx_slot_of_body(int body_id);
 
 void net_fx_set_session(netSession* sess)
 {
@@ -541,6 +543,21 @@ static void net_fx_flush_spawn(void)
 		return;
 		}
 
+	// Owner resolved here rather than at queue time: an arcane assigns it right
+	// after createBody, and the queue entry is made from inside createBody, so
+	// at that moment it is still unset. Without it a body born on its caster
+	// destroys itself the frame it appears (LittleSpider) or breaks its own
+	// crystal. A body with no protection carries 255.
+	for(int i = 0; i < net_fx_spawn_q_count; i ++){
+		Body* b = net_fx_spawn_body[i];
+		OwnerProtection* op = b ? dynamic_cast<OwnerProtection*>(b) : NULL;
+		int slot = op ? net_fx_slot_of_body(op -> owner()) : 255;
+		unsigned int ms = (op && slot != 255) ? (unsigned int)op -> duration() : 0;
+
+		net_fx_spawn_q[i].owner_slot = (unsigned char)slot;
+		net_fx_spawn_q[i].protect_ms = (unsigned short)(ms > 65535 ? 65535 : ms);
+	}
+
 	bytes = net_spawn_pack(buf,sizeof(buf),net_fx_sess -> tick(),
 				net_fx_spawn_q,net_fx_spawn_q_count);
 
@@ -553,10 +570,29 @@ static void net_fx_flush_spawn(void)
 	net_fx_spawn_q_count = 0;
 }
 
+// The slot of the racer whose body id this is, or 255. Owner protection is
+// carried as a slot because the wire keys racers by slot everywhere else and a
+// body id means nothing on the client.
+static int net_fx_slot_of_body(int body_id)
+{
+	mchRacer* rp;
+	int slot = 0;
+
+	if(!body_id || !mch_raceD) return 255;
+
+	rp = mch_raceD -> racerLst -> first();
+	while(rp){
+		if(rp -> Body::ID == body_id) return slot;
+		rp = rp -> next;
+		slot ++;
+	}
+
+	return 255;
+}
+
 static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 {
 	netSpawn* s;
-
 	if(!net_fx_sess) return;
 
 	// A burst larger than one batch goes out as one batch rather than not at
@@ -566,7 +602,9 @@ static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 
 	if(net_fx_spawn_q_count >= NET_MAX_SPAWN_PER_PACKET) return;
 
-	s = &net_fx_spawn_q[net_fx_spawn_q_count ++];
+	s = &net_fx_spawn_q[net_fx_spawn_q_count];
+	net_fx_spawn_body[net_fx_spawn_q_count] = b;
+	net_fx_spawn_q_count ++;
 
 	memset(s,0,sizeof(netSpawn));
 
@@ -574,8 +612,9 @@ static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 	s -> type = e -> type;
 	s -> variant = e -> variant;
 
-	// The engine tracks ownership by body id and the wire by slot, and only
-	// racers own anything. 255 is "nobody", which is what -1 says on the wire.
+	// The owner is resolved in net_fx_flush_spawn, not here: an arcane sets it
+	// right after createBody, which is where this queue entry is made, so at
+	// this point it is still unset. 255 is filled in at flush.
 	s -> owner_slot = 255;
 
 	const Vect3f& p = b -> R();
@@ -711,6 +750,30 @@ static void net_fx_make_link(const netSpawn* s,Body* p,const Vect3f& pos,const V
 		}
 }
 
+/*
+	Client side: hand a replicated class B body the same owner its host copy
+	has. Without it a body born on its caster (a spider at the wheel, a crystal
+	under the car) treats the caster as a target and destroys itself at once.
+	The slot is resolved to the local racer's body id, the same order the roster
+	hands slots out.
+*/
+static void net_fx_apply_owner(const netSpawn* s,Body* p)
+{
+	OwnerProtection* op;
+	mchRacer* rp;
+
+	if(s -> owner_slot == 255 || !p || !mch_raceD) return;
+
+	op = dynamic_cast<OwnerProtection*>(p);
+	if(!op) return;
+
+	rp = mch_raceD -> racerLst -> first();
+	for(int slot = 0; rp && slot < (int)s -> owner_slot; slot ++)
+		rp = rp -> next;
+
+	if(rp) op -> set_owner(rp -> Body::ID,s -> protect_ms ? (int)s -> protect_ms : 2000);
+}
+
 static void net_fx_create(const netSpawn* s)
 {
 	Body* p = NULL;
@@ -752,6 +815,7 @@ static void net_fx_create(const netSpawn* s)
 			if(!p) return;
 
 			net_fx_register(s -> entity_id,p -> ID,s -> type,s -> variant,0);
+			net_fx_apply_owner(s,p);
 
 			// Homing. The host picks the target inside set_owner, keyed by the
 			// owner's body id, which means nothing here. Point it at the
@@ -766,31 +830,32 @@ static void net_fx_create(const netSpawn* s)
 			}
 
 		switch(s -> type){
-			case NET_ENT_CANNON_BOMB:	p = new fxlabCannonBomb(model,pos,vel,damage,-1); break;
-			case NET_ENT_VOLCANIC_BOMB:	p = new fxlabVolcanicBomb(model,pos,vel,damage,-1); break;
-			case NET_ENT_FIRE_BOLIDE:	p = new fxlabFireBolide(model,pos,vel,damage,-1); break;
-			case NET_ENT_SNOW_BALL:	p = new fxlabSnowBall(model,pos,vel,damage,-1); break;
-			case NET_ENT_SLEEPY_MORTAR:	p = new fxlabSleepyMortar(model,pos,vel,damage,-1); break;
-			case NET_ENT_MINOR_BONUS:	p = new fxlabMinorBonus(model,pos,vel,damage,-1); break;
-			case NET_ENT_MAJOR_BONUS:	p = new fxlabMajorBonus(model,pos,vel,damage,-1); break;
-
-			// The constructor turns its velocity argument into world units on
-			// its own (V_*Gravity*0.1), so it is built at rest and handed the
-			// host's velocity verbatim. Its spin is rolled from the local RNG
-			// and will differ from the host's; that is cosmetic and the price
-			// of not sending angular velocity.
-			case NET_ENT_TITANIUM_BALL:
-				p = new TitaniumBall(pos,Vect3f(0,0,0),damage,-1);
-				if(p) p -> setGlobalVelocity(vel);
-				break;
+			case NET_ENT_CANNON_BOMB:	p = new fxlabCannonBomb(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_VOLCANIC_BOMB:	p = new fxlabVolcanicBomb(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_FIRE_BOLIDE:	p = new fxlabFireBolide(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_SNOW_BALL:	p = new fxlabSnowBall(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_SLEEPY_MORTAR:	p = new fxlabSleepyMortar(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_MINOR_BONUS:	p = new fxlabMinorBonus(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_MAJOR_BONUS:	p = new fxlabMajorBonus(model,pos,Vect3f(0,0,0),damage,-1); break;
+			case NET_ENT_TITANIUM_BALL:	p = new TitaniumBall(pos,Vect3f(0,0,0),damage,-1); break;
 
 			default: return;
 			}
 
 		if(!p) return;
 
+		// Every one of these constructors turns its velocity argument into
+		// world units on its own (V_*Gravity*0.1, see Meteorite). The wire
+		// already carries the host's world velocity, so the body is built at
+		// rest and handed it verbatim; passing it into the constructor scales
+		// it a second time and the copy starts several times too fast. Spin is
+		// still rolled from the local RNG and will differ from the host's; that
+		// is cosmetic and the price of not sending angular velocity.
+		p -> setGlobalVelocity(vel);
+
 		net_fx_register(s -> entity_id,p -> ID,s -> type,s -> variant,0);
 		Mdisp -> attachBody(p);
+		net_fx_apply_owner(s,p);
 
 		net_fx_make_link(s,p,pos,vel);
 		return;
