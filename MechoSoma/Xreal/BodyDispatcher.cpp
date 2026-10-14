@@ -273,6 +273,7 @@ void BodyDispatcher::attachFieldSource(FieldSource* source)
 		bout < "attachFieldSource: " <= source -> type() < "\n";
 #endif
 	permanent_fields_grid.add(source); 
+	net_fx_field_attach(source);
 } 
 void BodyDispatcher::moveFieldSource(FieldSource* source, const Vect3f& r)
 {	
@@ -304,6 +305,7 @@ void BodyDispatcher::deleteFieldSource(FieldSource* source)
 	if(xreal_log)
 		bout < "deleteFieldSource: " <= source -> type() < "\n";
 #endif
+	net_fx_field_detach(source);
 	permanent_fields_grid.remove(source); 
 } 
 void BodyDispatcher::fieldsAffection(Body& body)

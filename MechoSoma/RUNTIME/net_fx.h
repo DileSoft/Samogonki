@@ -34,6 +34,7 @@
 #include <cstdio>
 
 class Body;
+class FieldSource;
 class netSession;
 
 // Set by the game layer once the transport exists, cleared when it goes away.
@@ -118,5 +119,16 @@ void net_fx_update_actors(void);
 // Host side: clear the "already spawned" flag on every actor so the next
 // update pass sends them all again. For a player who joins mid-race.
 void net_fx_resend_actors(void);
+
+/*
+	Dynamic field sources - slime circles, red track, damage sensors. They are
+	BaseObjects in a field grid, not bodies, so attachBody never sees them and
+	they travelled nowhere before this. Called from BodyDispatcher: the host
+	register a new source and queues a spawn under the source's entity type; a
+	client removing a replicated one is a no-op. detach is the death of the
+	source, and queues a despawn on the host.
+*/
+void net_fx_field_attach(FieldSource* source);
+void net_fx_field_detach(FieldSource* source);
 
 #endif /* __NET_FX_H__ */

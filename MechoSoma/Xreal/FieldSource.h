@@ -42,6 +42,11 @@ public:
 	
 	Type type() const { return type_; }
 
+	// Replication reads these: a field travels as its centre and radius, and
+	// they are protected here, so a public reader is the whole reason for it.
+	const Vect3f& position_() const { return position; }
+	float radius_() const { return radius; }
+
 	virtual void affect(Body& b) const  = 0;
 	virtual void show() const;
 	

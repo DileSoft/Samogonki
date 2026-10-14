@@ -39,6 +39,8 @@
 #include "TitaniumBall.h"
 
 #include "race.h"
+#include "FieldSource.h"
+#include "CustomFieldSources.h"
 
 #include <cstring>
 #include <cmath>
@@ -80,6 +82,26 @@ static int net_fx_despawn_q_count = 0;
 static netActorState net_fx_actor_q[NET_MAX_ACTORS_PER_PACKET];
 static int net_fx_actor_q_count = 0;
 
+/*
+	Dynamic field sources (slime, red track, sensors) travel on the same
+	spawn/despawn channel as bodies, under the area entity types, but they are
+	BaseObjects in a field grid rather than bodies: attachBody never sees them
+	and there is no body id to key them by. This table is their counterpart of
+	net_fx_table.
+*/
+static const int NET_MAX_FIELDS = 64;
+
+struct netFxField
+{
+	unsigned short entity_id;
+	unsigned char type;
+	unsigned char variant;
+	FieldSource* source;
+};
+
+static netFxField net_fx_fields[NET_MAX_FIELDS];
+static int net_fx_field_count = 0;
+
 // State that arrived before the spawn it belongs to. Declared here rather
 // than next to the rest of the receive path because reset has to clear it.
 static netActorState net_fx_actor_pending[NET_MAX_ACTORS_PER_PACKET];
@@ -99,7 +121,11 @@ static int net_fx_pending_type = 0;
 static int net_fx_spawn_building = 0;
 
 static void net_fx_flush_spawn(void);
+static void net_fx_queue_despawn(unsigned short entity_id);
 static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link);
+static void net_fx_queue_field_spawn(unsigned short entity_id,FieldSource* fs,int type,int variant);
+static int net_fx_field_find(unsigned short entity_id);
+static int net_fx_is_field(unsigned char type);
 static void net_fx_pending_drain(void);
 static int net_fx_body_type(const char* name);
 static int net_fx_slot_of_body(int body_id);
@@ -131,6 +157,7 @@ void net_fx_reset(void)
 	net_fx_pending_link = -1;
 	net_fx_pending_type = 0;
 	net_fx_spawn_building = 0;
+	net_fx_field_count = 0;
 }
 
 /*
@@ -500,7 +527,24 @@ void net_fx_update_actors(void)
 
 		float d2 = net_fx_viewer_distance(b -> R());
 
-		if(d2 > (float)NET_ACTOR_SPAWN_RADIUS * (float)NET_ACTOR_SPAWN_RADIUS) continue;
+		// Out of every viewer's range: the client has no business holding a
+		// copy it will never see updated. Tell it to drop the one it has, and
+		// clear the latch so the body is spawned again if it comes back. This
+		// is what stops a bonus man thrown to random(2048) by a pickup, or a
+		// worm that wandered off, from sitting frozen on the client forever.
+		if(d2 > (float)NET_ACTOR_SPAWN_RADIUS * (float)NET_ACTOR_SPAWN_RADIUS){
+			if(e -> spawn_sent){
+				net_fx_queue_despawn(e -> entity_id);
+
+				// A fresh id for the next spawn. Reusing this one would race
+				// the queued despawn against the eventual spawn on the client,
+				// and a spawn that arrives first would register a second entry
+				// under the same id.
+				e -> entity_id = net_fx_new_id();
+				e -> spawn_sent = 0;
+				}
+			continue;
+			}
 
 		if(!e -> spawn_sent){
 			net_fx_queue_spawn(e,b,-1);
@@ -531,6 +575,14 @@ void net_fx_resend_actors(void)
 	for(int i = 0; i < net_fx_count; i ++)
 		if(net_fx_table[i].is_actor)
 			net_fx_table[i].spawn_sent = 0;
+
+	// Fields are sent once, when they appear, so one created before this client
+	// joined would never reach it. Re-queue every live one; a client that
+	// already tracks the id drops the duplicate.
+	for(int i = 0; i < net_fx_field_count; i ++)
+		net_fx_queue_field_spawn(net_fx_fields[i].entity_id,
+					 net_fx_fields[i].source,
+					 net_fx_fields[i].type,net_fx_fields[i].variant);
 }
 
 static void net_fx_flush_spawn(void)
@@ -550,7 +602,12 @@ static void net_fx_flush_spawn(void)
 	// crystal. A body with no protection carries 255.
 	for(int i = 0; i < net_fx_spawn_q_count; i ++){
 		Body* b = net_fx_spawn_body[i];
-		OwnerProtection* op = b ? dynamic_cast<OwnerProtection*>(b) : NULL;
+		OwnerProtection* op;
+
+		// A field spawn has no body: it packed its own owner when queued.
+		if(!b) continue;
+
+		op = dynamic_cast<OwnerProtection*>(b);
 		int slot = op ? net_fx_slot_of_body(op -> owner()) : 255;
 		unsigned int ms = (op && slot != 255) ? (unsigned int)op -> duration() : 0;
 
@@ -590,11 +647,129 @@ static int net_fx_slot_of_body(int body_id)
 	return 255;
 }
 
+/* ------------------------------ field sources ---------------------------- */
+
+static int net_fx_is_field(unsigned char type)
+{
+	return type == NET_ENT_SLIME_CIRCLE || type == NET_ENT_RED_TRACK ||
+	       type == NET_ENT_DAMAGE_SENSOR;
+}
+
+static int net_fx_field_find(unsigned short entity_id)
+{
+	for(int i = 0; i < net_fx_field_count; i ++)
+		if(net_fx_fields[i].entity_id == entity_id) return i;
+
+	return -1;
+}
+
+// The wire type and subtype of a field source, or 0 if it does not travel.
+// Only the effects that change how a car drives are sent; a purely visual
+// source has nothing to reproduce.
+static int net_fx_field_class(FieldSource* fs,int* type,int* variant)
+{
+	int t;
+
+	*variant = 0;
+	if(!fs) return 0;
+
+	t = fs -> type();
+
+	/*
+		The red trail a car leaves behind is a RedTrackSource - thousands of
+		short-lived copies, one per stretch of track. It is a visual, and
+		replicating it floods the spawn queue and starves the real entities.
+		A circle map source of the same type (an arcane's slip patch) is a real
+		effect and still travels.
+	*/
+	if(t == FieldSource::RED_TRACK && dynamic_cast<RedTrackSource*>(fs))
+		return 0;
+
+	switch(t){
+		case FieldSource::WILD_THICKET:		*type = NET_ENT_SLIME_CIRCLE; *variant = 0; return 1;
+		case FieldSource::RAGE_OF_SLIME:	*type = NET_ENT_SLIME_CIRCLE; *variant = 1; return 1;
+		case FieldSource::GREEN_SLIME:		*type = NET_ENT_SLIME_CIRCLE; *variant = 2; return 1;
+		case FieldSource::YELLOW_SLIME:		*type = NET_ENT_SLIME_CIRCLE; *variant = 3; return 1;
+		case FieldSource::BLUE_SLIME:		*type = NET_ENT_SLIME_CIRCLE; *variant = 4; return 1;
+		case FieldSource::RED_TRACK:		*type = NET_ENT_RED_TRACK;    *variant = 0; return 1;
+		case FieldSource::Sensor:		*type = NET_ENT_DAMAGE_SENSOR;*variant = 0; return 1;
+		}
+
+	return 0;
+}
+
+static int net_fx_field_map_type(int variant)
+{
+	switch(variant){
+		case 0: return FieldSource::WILD_THICKET;
+		case 1: return FieldSource::RAGE_OF_SLIME;
+		case 2: return FieldSource::GREEN_SLIME;
+		case 3: return FieldSource::YELLOW_SLIME;
+		case 4: return FieldSource::BLUE_SLIME;
+		}
+
+	return FieldSource::WILD_THICKET;
+}
+
+// The local body id of the racer in a slot, or 0. The owner of a field is a
+// racer on the host; the id is machine-local and has to be resolved here.
+static int net_fx_racer_body_id(int slot)
+{
+	mchRacer* rp;
+	int s = 0;
+
+	if(slot < 0 || !mch_raceD) return 0;
+
+	rp = mch_raceD -> racerLst -> first();
+	while(rp){
+		if(s == slot) return rp -> Body::ID;
+		rp = rp -> next;
+		s ++;
+	}
+
+	return 0;
+}
+
+/*
+	Host: queue a spawn for a field source. A field has no mesh and no body, so
+	the radius rides in model_id (quarter units) and the subtype in variant;
+	everything else is the shared netSpawn layout. The owner is packed here
+	rather than resolved at flush, because there is no body to look it up from.
+*/
+static void net_fx_queue_field_spawn(unsigned short entity_id,FieldSource* fs,int type,int variant)
+{
+	netSpawn* s;
+	const Vect3f& p = fs -> position_();
+	OwnerProtection* op = dynamic_cast<OwnerProtection*>(fs);
+	int qi;
+
+	if(!net_fx_sess) return;
+
+	if(net_fx_spawn_q_count >= NET_MAX_SPAWN_PER_PACKET)
+		net_fx_flush_spawn();
+	if(net_fx_spawn_q_count >= NET_MAX_SPAWN_PER_PACKET) return;
+
+	qi = net_fx_spawn_q_count;
+	s = &net_fx_spawn_q[qi];
+	net_fx_spawn_body[qi] = NULL;		// field: owner is packed below
+	net_fx_spawn_q_count ++;
+
+	memset(s,0,sizeof(netSpawn));
+
+	s -> entity_id = entity_id;
+	s -> type = (unsigned char)type;
+	s -> variant = (unsigned char)variant;
+	s -> owner_slot = op ? (unsigned char)net_fx_slot_of_body(op -> owner()) : 255;
+	s -> pos_x = net_q_spawn_pos(p.x);
+	s -> pos_y = net_q_spawn_pos(p.y);
+	s -> pos_z = net_q_spawn_pos(p.z);
+	s -> model_id = (unsigned int)(fs -> radius_() * 4.0f + 0.5f);
+}
+
 static void net_fx_queue_spawn(const netFxEntry* e,Body* b,int client_link)
 {
 	netSpawn* s;
 	if(!net_fx_sess) return;
-
 	// A burst larger than one batch goes out as one batch rather than not at
 	// all: send what fits, keep the rest for the next tick.
 	if(net_fx_spawn_q_count >= NET_MAX_SPAWN_PER_PACKET)
@@ -731,6 +906,49 @@ void net_fx_attach(Body* body)
 	net_fx_queue_spawn(&net_fx_table[net_fx_count - 1],body,link);
 }
 
+/*
+	Host: a dynamic field source appeared. Classified by its type and given an
+	entity id of its own; the client rebuilds it from that.
+*/
+void net_fx_field_attach(FieldSource* source)
+{
+	int type = 0,variant = 0;
+
+	if(!mchNetGame || !mchNetHost) return;
+	if(!source) return;
+	if(net_fx_field_count >= NET_MAX_FIELDS) return;
+	if(!net_fx_field_class(source,&type,&variant)) return;
+
+	net_fx_fields[net_fx_field_count].entity_id = net_fx_new_id();
+	net_fx_fields[net_fx_field_count].type = (unsigned char)type;
+	net_fx_fields[net_fx_field_count].variant = (unsigned char)variant;
+	net_fx_fields[net_fx_field_count].source = source;
+	net_fx_field_count ++;
+
+	net_fx_queue_field_spawn(net_fx_fields[net_fx_field_count - 1].entity_id,
+				 source,type,variant);
+}
+
+/*
+	Host: the field died. Tell the clients, then forget it. A client removing
+	its own copy never reaches here: it is not the host.
+*/
+void net_fx_field_detach(FieldSource* source)
+{
+	int at;
+
+	if(!mchNetGame || !mchNetHost) return;
+
+	for(at = 0; at < net_fx_field_count; at ++)
+		if(net_fx_fields[at].source == source) break;
+	if(at >= net_fx_field_count) return;
+
+	net_fx_queue_despawn(net_fx_fields[at].entity_id);
+
+	net_fx_fields[at] = net_fx_fields[net_fx_field_count - 1];
+	net_fx_field_count --;
+}
+
 /* ------------------------------ client side ------------------------------ */
 
 // The visual the host built next to a class B body, if any. Bound to the body
@@ -774,6 +992,47 @@ static void net_fx_apply_owner(const netSpawn* s,Body* p)
 	if(rp) op -> set_owner(rp -> Body::ID,s -> protect_ms ? (int)s -> protect_ms : 2000);
 }
 
+/*
+	Client: build a field source from a spawn. Reconstructed through the same
+	classes the host used; subtype and radius are all it needs. A plain circle
+	stands in for the red-track trail - the gameplay is identical and the drawn
+	trail is local and cosmetic.
+*/
+static void net_fx_create_field(const netSpawn* s,const Vect3f& pos)
+{
+	FieldSource* fs = NULL;
+	int owner_id = net_fx_racer_body_id(s -> owner_slot == 255 ? -1 : (int)s -> owner_slot);
+	float radius = (float)s -> model_id / 4.0f;
+
+	if(net_fx_field_find(s -> entity_id) >= 0) return;
+	if(net_fx_field_count >= NET_MAX_FIELDS) return;
+
+	switch(s -> type){
+		case NET_ENT_SLIME_CIRCLE:
+			fs = new CircleMapSource(pos.x,pos.y,radius,
+				(FieldSource::Type)net_fx_field_map_type(s -> variant),owner_id);
+			break;
+
+		case NET_ENT_RED_TRACK:
+			fs = new CircleMapSource(pos.x,pos.y,radius,FieldSource::RED_TRACK,owner_id);
+			break;
+
+		case NET_ENT_DAMAGE_SENSOR:
+			fs = new SensorFieldSource(pos,radius,(int)s -> variant);
+			break;
+		}
+
+	if(!fs) return;
+
+	net_fx_fields[net_fx_field_count].entity_id = s -> entity_id;
+	net_fx_fields[net_fx_field_count].type = s -> type;
+	net_fx_fields[net_fx_field_count].variant = s -> variant;
+	net_fx_fields[net_fx_field_count].source = fs;
+	net_fx_field_count ++;
+
+	if(Mdisp) Mdisp -> attachBaseObject(fs);
+}
+
 static void net_fx_create(const netSpawn* s)
 {
 	Body* p = NULL;
@@ -792,6 +1051,18 @@ static void net_fx_create(const netSpawn* s)
 	// nothing. A type this build has never heard of is dropped the same way:
 	// its id then matches nothing here and the despawn is ignored as unknown.
 	if(!s -> entity_id) return;
+
+	// Already tracked: a re-send (the actor resend on join) or a spawn that
+	// overtook its own despawn. Building it again would leave two entries
+	// under one id, and every state batch would reach only one of them while
+	// both sat in the world.
+	if(net_fx_find(s -> entity_id) >= 0) return;
+
+	// Field sources are BaseObjects, not bodies, and have their own build.
+	if(net_fx_is_field(s -> type)){
+		net_fx_create_field(s,pos);
+		return;
+		}
 
 	is_actor = net_fx_is_actor(s -> type);
 	name = is_actor ? net_fx_actor_name(s -> type,s -> variant) : NULL;
@@ -908,8 +1179,23 @@ void net_fx_despawn_recv(const unsigned char* data,unsigned int len)
 	int count = net_despawn_unpack(batch,NET_MAX_DESPAWN_PER_PACKET,data,(int)len);
 
 	for(int i = 0; i < count; i ++){
-		int at = net_fx_find(batch[i].entity_id);
+		int fi = net_fx_field_find(batch[i].entity_id);
+		int at;
 		Body* b;
+
+		// A replicated field source: not a body, so it leaves through the
+		// base-object path and its own table.
+		if(fi >= 0){
+			FieldSource* fs = net_fx_fields[fi].source;
+
+			net_fx_fields[fi] = net_fx_fields[net_fx_field_count - 1];
+			net_fx_field_count --;
+
+			if(fs && Mdisp) Mdisp -> deleteBaseObject(fs);
+			continue;
+			}
+
+		at = net_fx_find(batch[i].entity_id);
 
 		// A despawn for something this machine never had. It happens whenever
 		// a spawn was lost or arrived after the body it named was already
@@ -1080,6 +1366,24 @@ void net_fx_trace(FILE* f,unsigned int tick)
 			p.x,p.y,p.z,b -> psi(),v.x,v.y,v.z,v.norm(),
 			(unsigned)(b -> geometry ? b -> geometry -> Type : 0),
 			b -> alive() ? 1 : 0);
+	}
+
+	// Field sources are BaseObjects with no body, but they travel the same
+	// channel and are worth comparing: a slime circle the host placed has to
+	// exist on the client too. The centre goes in the pose columns and the
+	// radius in the speed column (unused for a field).
+	for(int i = 0; i < net_fx_field_count; i ++){
+		netFxField* fld = &net_fx_fields[i];
+		FieldSource* fs = fld -> source;
+		const Vect3f& p = fs -> position_();
+
+		fprintf(f,
+			"%u,E,%u,%u,%u,%.4f,%.4f,%.4f,%.6f,0,0,0,%.2f,"
+			"0,0,0,0,0,0,0,0,0,0,0,0,0,0,%u,%d\n",
+			tick,(unsigned)fld -> entity_id,(unsigned)fld -> type,
+			(unsigned)fld -> variant,
+			p.x,p.y,p.z,0.0,fs -> radius_(),
+			(unsigned)(fs -> radius_() * 4.0f + 0.5f),1);
 	}
 }
 
