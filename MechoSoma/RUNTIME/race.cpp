@@ -3476,7 +3476,7 @@ void mchMechosRacer::Quant(void)
 			for(i = 0; i < NUM_ACTIVE_PARTS; i ++){
 				stPtr -> last_config[i] = (M3D_KIND(part_by_type(mchPartID[i]) -> Type)) & 0x3F;
 			}
-			if(!trkEnableFlag && mchBotArcaneUsing && flags & MCH_AI && !is_bot_input())
+			if(!trkEnableFlag && mchBotArcaneUsing && flags & MCH_AI)
 				mch_raceD -> AI_ArcaneQuant(this);
 		}
 	}
