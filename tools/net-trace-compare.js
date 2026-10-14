@@ -60,11 +60,11 @@ const ENT_NAMES = {
 	17:'tomato',18:'little_spider',
 	19:'bonus_man',20:'butterfly',21:'wicked_butterfly',22:'dragon',23:'shark',24:'whale',
 	25:'frog',26:'worm',27:'caterpillar',28:'fish',
-	29:'trap_sphere',30:'red_track',31:'slime_circle',32:'damage_sensor',
+	29:'trap_sphere',30:'red_track',31:'slime_circle',32:'damage_sensor',33:'force_field',
 };
 // Entity types below BONUS_MAN are class B (independently simulated), above
 // are class C (state-replicated).
-const entIsActor = t => t >= 19 && t <= 32;
+const entIsActor = t => t >= 19 && t <= 33;
 // Walking bonuses are the four BonusMan subclasses, one enum value, split by
 // variant. This is the label the report shows for them.
 function entLabel(type, variant) {

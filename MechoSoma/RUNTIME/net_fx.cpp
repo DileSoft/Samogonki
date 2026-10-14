@@ -661,7 +661,7 @@ static int net_fx_slot_of_body(int body_id)
 static int net_fx_is_field(unsigned char type)
 {
 	return type == NET_ENT_SLIME_CIRCLE || type == NET_ENT_RED_TRACK ||
-	       type == NET_ENT_DAMAGE_SENSOR;
+	       type == NET_ENT_DAMAGE_SENSOR || type == NET_ENT_FORCE_FIELD;
 }
 
 static int net_fx_field_find(unsigned short entity_id)
@@ -702,6 +702,13 @@ static int net_fx_field_class(FieldSource* fs,int* type,int* variant)
 		case FieldSource::BLUE_SLIME:		*type = NET_ENT_SLIME_CIRCLE; *variant = 4; return 1;
 		case FieldSource::RED_TRACK:		*type = NET_ENT_RED_TRACK;    *variant = 0; return 1;
 		case FieldSource::Sensor:		*type = NET_ENT_DAMAGE_SENSOR;*variant = 0; return 1;
+
+		// Arcanes' force fields. The force itself is built from constants the
+		// client shares; position, radius and owner reproduce it.
+		case FieldSource::Vortex:		*type = NET_ENT_FORCE_FIELD;  *variant = 0; return 1;
+		case FieldSource::Magnetic:		*type = NET_ENT_FORCE_FIELD;  *variant = 1; return 1;
+		case FieldSource::Attraction:		*type = NET_ENT_FORCE_FIELD;  *variant = 2; return 1;
+		case FieldSource::BubbleField:		*type = NET_ENT_FORCE_FIELD;  *variant = 3; return 1;
 		}
 
 	return 0;
@@ -1083,6 +1090,15 @@ static void net_fx_create_field(const netSpawn* s,const Vect3f& pos)
 
 		case NET_ENT_DAMAGE_SENSOR:
 			fs = new SensorFieldSource(pos,radius,(int)s -> variant);
+			break;
+
+		case NET_ENT_FORCE_FIELD:
+			switch(s -> variant){
+				case 0: fs = new VortexFieldSource(pos,radius,owner_id); break;
+				case 1: fs = new MagneticFieldSource(pos,radius,owner_id); break;
+				case 2: fs = new AttractionFieldSource(pos,radius,owner_id); break;
+				case 3: fs = new BubbleFieldSource(pos,radius,owner_id); break;
+				}
 			break;
 		}
 

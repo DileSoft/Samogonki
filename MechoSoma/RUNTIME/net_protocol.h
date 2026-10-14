@@ -463,6 +463,11 @@ enum netEntityTypes
 	NET_ENT_SLIME_CIRCLE,
 	NET_ENT_DAMAGE_SENSOR,
 
+	// A force field: vortex, magnetic, attraction, bubble. Position, radius
+	// and owner are the whole story - the force itself is built from a
+	// constant the client already has, so the subtype rides in variant.
+	NET_ENT_FORCE_FIELD,
+
 	NET_ENT_MAX
 };
 
