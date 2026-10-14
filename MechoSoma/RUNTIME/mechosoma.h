@@ -230,6 +230,7 @@ extern int  mchNetLobbyAuto;
 extern char mchNetLobbyAutoAddr[128];
 int  mchNetLobbyAutoQuant(void);
 int  mchNetLobbyClientJoined(void);
+int  mchNetLobbyTakeRebrowse(void);
 int  mchNetLobbyBrowseState(void);
 const char* mchNetLobbyBrowseStatus(void);
 int  mchNetLobbyMatchCount(void);

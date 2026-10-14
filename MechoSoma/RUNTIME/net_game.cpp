@@ -398,6 +398,7 @@ struct netLobbyKnock
 static netLobbyKnock net_lobby_knock[NET_MAX_PLAYERS];
 static int net_lobby_knock_count = 0;
 static int net_lobby_seated_logged = 0;
+static int net_lobby_rebrowse = 0;	// client: a rejected pick sent it back to the list
 
 // Last sampled position per slot, so the periodic log can say whether the
 // field is actually driving or just sitting there.
@@ -2229,6 +2230,7 @@ void mchNetLobbyServerHangup(void)
 	net_lobby_join_id = -1;
 	net_lobby_knock_count = 0;
 	net_lobby_seated_logged = 0;
+	net_lobby_rebrowse = 0;
 }
 
 static void net_lobby_knock_remember(unsigned int ip,unsigned short port)
@@ -2325,6 +2327,28 @@ void mchNetMenuPump(void)
 			net_lobby_list_ms = now;
 			net_lobby_S -> request_list();
 		}
+	}
+
+	// Client: the pick is gone (the host re-created its game and the server no
+	// longer has that id). Drop it and list again; re-asking a dead id is what
+	// left the client waiting forever while the host saw nobody. Errors that
+	// are worth retrying - the host has not probed yet - do not come through
+	// here, so a transient one still gets its retries.
+	if(!mchNetHost && net_lobby_S -> take_join_rejected()){
+		net_log("client: no match %d, re-listing",net_lobby_join_id);
+		net_lobby_join_id = -1;
+		net_lobby_list_ms = 0;
+		net_lobby_S -> request_list();
+
+		// If the pick was made from the browser and it turned out stale, the
+		// screen is already back on the list; if the client had left the
+		// browser for the session, it now has no host and no seat, so ask the
+		// screen to show the list again rather than sit on an empty roster.
+		if(net_match_S && net_match_S -> local_slot() < 0){
+			net_lobby_joined = 0;
+			net_lobby_browse = 1;
+			net_lobby_rebrowse = 1;
+			}
 	}
 
 	// Client: the introduction is not a one-shot. A JOIN sent before this
@@ -2452,6 +2476,14 @@ int mchNetLobbyAutoQuant(void)
 int mchNetLobbyBrowseState(void){ return net_lobby_S ? net_lobby_S -> state() : NET_LOBBY_IDLE; }
 const char* mchNetLobbyBrowseStatus(void){ return net_lobby_S ? net_lobby_S -> status() : ""; }
 int mchNetLobbyClientJoined(void){ return net_lobby_joined; }
+
+// 1 once, if a rejected pick should put the screen back on the match list.
+int mchNetLobbyTakeRebrowse(void)
+{
+	int r = net_lobby_rebrowse;
+	net_lobby_rebrowse = 0;
+	return r;
+}
 
 int mchNetLobbyMatchCount(void)
 {
@@ -2603,6 +2635,7 @@ void mchNetFinit(void)
 	net_lobby_join_id = -1;
 	net_lobby_knock_count = 0;
 	net_lobby_seated_logged = 0;
+	net_lobby_rebrowse = 0;
 
 	net_log("net race end");
 	net_trace_close();

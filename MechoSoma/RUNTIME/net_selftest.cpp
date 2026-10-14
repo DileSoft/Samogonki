@@ -1562,6 +1562,7 @@ static int net_test_client_lobby(FILE* f)
 	srv_in[0] = 0;
 	int srv_len = 0;
 	int got_ready = 0,got_match = 0,got_peer = 0;
+	int got_reject = 0;
 	unsigned short peer_port = 0;
 	int listed = 0;
 	int ok;
@@ -1622,7 +1623,14 @@ static int net_test_client_lobby(FILE* f)
 					netSocketTcpSend(conn,r,(int)strlen(r));
 				}
 				else if(!strncmp(start,"JOIN",4)){
-					const char* r = "PEER 127.0.0.1 9999\n";
+					int jid = atoi(start + 4);
+					char r[64];
+
+					if(jid == 7)
+						snprintf(r,sizeof(r),"PEER 127.0.0.1 9999\n");
+					else
+						snprintf(r,sizeof(r),"ERROR no match %d\n",jid);
+
 					netSocketTcpSend(conn,r,(int)strlen(r));
 				}
 
@@ -1644,7 +1652,15 @@ static int net_test_client_lobby(FILE* f)
 
 			listed = 1;
 			got_match = m && !strcmp(m -> name,"Stub Match");
-			if(m && m -> id == 7) lob.join(m -> id);
+
+			// A stale pick first: the server must say "no match", the client
+			// must notice and drop it, and then the good id must go through.
+			if(got_match) lob.join(99);
+		}
+
+		if(!got_reject && lob.take_join_rejected()){
+			got_reject = 1;
+			lob.join(7);
 		}
 
 		{
@@ -1660,10 +1676,10 @@ static int net_test_client_lobby(FILE* f)
 		netSleep(2);
 	}
 
-	ok = got_ready && got_match && got_peer && peer_port == 9999;
+	ok = got_ready && got_match && got_reject && got_peer && peer_port == 9999;
 
-	net_logf(f,"clientlobby: ready=%d match=%d peer=%d port=%u",
-		got_ready,got_match,got_peer,(unsigned)peer_port);
+	net_logf(f,"clientlobby: ready=%d match=%d reject=%d peer=%d port=%u",
+		got_ready,got_match,got_reject,got_peer,(unsigned)peer_port);
 
 	if(conn != NET_SOCKET_INVALID) netSocketClose(conn);
 	netSocketClose(listener);

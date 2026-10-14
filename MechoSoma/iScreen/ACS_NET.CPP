@@ -1077,6 +1077,15 @@ void acsNetMenuQuant(void)
 	// only from the in-session lobby.
 	mchNetMenuPump();
 
+	// A stale pick the server rejected while this machine had already left the
+	// list for the session: there is no host there, so put the list back.
+	if(nm_lobby && !nm_host && mchNetLobbyTakeRebrowse()){
+		nm_lobby = 0;
+		nm_browse = 1;
+		nm_refresh();
+		return;
+	}
+
 	if(nm_browse){
 		// The server introduced a host: the client leaves the list and joins
 		// the session, which is now connecting.

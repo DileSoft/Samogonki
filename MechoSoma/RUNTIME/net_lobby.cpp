@@ -24,6 +24,7 @@ netLobbyClient::netLobbyClient(void)
 	_match_count = 0;
 	_registered_id = 0;
 	_peer_count = 0;
+	_join_rejected = 0;
 }
 
 netLobbyClient::~netLobbyClient(void)
@@ -55,6 +56,7 @@ void netLobbyClient::close(void)
 	_match_count = 0;
 	_registered_id = 0;
 	_peer_count = 0;
+	_join_rejected = 0;
 	_status[0] = 0;
 
 	// Empty the buffers as well as their lengths: the parse walks them from
@@ -272,6 +274,12 @@ void netLobbyClient::handle_line(char* line)
 	}
 
 	if(!strncmp(line,"ERROR ",6)){
+		// "no match" is permanent for this id: the host re-created its game
+		// and this one is gone. Any other error (say the host has not probed
+		// yet) is worth another try, so it does not set the flag.
+		if(!strncmp(line + 6,"no match",8))
+			_join_rejected = 1;
+
 		set_status(line + 6);
 		return;
 	}
@@ -336,4 +344,11 @@ int netLobbyClient::pop_peer(netLobbyPeer* out)
 void netLobbyClient::clear_peers(void)
 {
 	_peer_count = 0;
+}
+
+int netLobbyClient::take_join_rejected(void)
+{
+	int r = _join_rejected;
+	_join_rejected = 0;
+	return r;
 }

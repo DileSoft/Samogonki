@@ -75,6 +75,9 @@ public:
 	int pop_peer(netLobbyPeer* out);
 	void clear_peers(void);
 
+	// 1 once, if the last JOIN came back "no match". Reading it clears it.
+	int take_join_rejected(void);
+
 private:
 	netSocket _sock;
 	int _state;
@@ -93,6 +96,11 @@ private:
 	int _match_count;
 
 	unsigned short _registered_id;
+
+	// Set when the server answers a JOIN with "no match": the pick is stale
+	// (the host re-created its game and the old id is gone), so the caller
+	// must drop it and list again rather than keep asking for a dead id.
+	int _join_rejected;
 
 	netLobbyPeer _peers[8];
 	int _peer_count;
