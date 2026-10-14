@@ -3776,17 +3776,34 @@ void mchRaceDispatcher::setCheckpointNStar(mchRacer* r)
 		return;
 
 	cp = getCP(r -> stPtr -> Checkpoint);
-	racer_stand(r,rl,rc);
 
-	p = racerLst -> first();
-	while(p){
-		int lp,lc;
+	/*
+		A net game shows the reward for the runner's place, exactly as the start
+		checkpoint does: ChStarMAX - place, so fourth place leaves two stars.
+		Ranking by strict Lap/Checkpoint instead reads five for a fourth-place
+		car that has not yet crossed the checkpoint the leaders are also on, and
+		five stars is not what the start line or the finish payout shows. The
+		standings are still the host's (racer_stand), so host and client agree.
+	*/
+	if(mchNetGame && r -> stPtr){
+		pl = (int)r -> stPtr -> place;
 
-		racer_stand(p,lp,lc);
+		if(pl < 0) pl = 0;
+		if(pl > (int)racerLst -> size()) pl = (int)racerLst -> size();
+	}
+	else {
+		racer_stand(r,rl,rc);
 
-		if(lp > rl || (lp == rl && lc > rc))
-			pl ++;
-		p = p -> next;
+		p = racerLst -> first();
+		while(p){
+			int lp,lc;
+
+			racer_stand(p,lp,lc);
+
+			if(lp > rl || (lp == rl && lc > rc))
+				pl ++;
+			p = p -> next;
+		}
 	}
 
 	if(cp){
@@ -3810,17 +3827,26 @@ int mchRaceDispatcher::getCheckpointNStar(mchRacer* r)
 	if(r -> flags & MCH_FINISHED || !cp -> ID) 
 		return 0;
 
-	racer_stand(r,rl,rc);
+	// Same as setCheckpointNStar: a net game pays out by place.
+	if(mchNetGame && r -> stPtr){
+		pl = (int)r -> stPtr -> place;
 
-	p = racerLst -> first();
-	while(p){
-		int lp,lc;
+		if(pl < 0) pl = 0;
+		if(pl > (int)racerLst -> size()) pl = (int)racerLst -> size();
+	}
+	else {
+		racer_stand(r,rl,rc);
 
-		racer_stand(p,lp,lc);
+		p = racerLst -> first();
+		while(p){
+			int lp,lc;
 
-		if(lp > rl || (lp == rl && lc > rc))
-			pl ++;
-		p = p -> next;
+			racer_stand(p,lp,lc);
+
+			if(lp > rl || (lp == rl && lc > rc))
+				pl ++;
+			p = p -> next;
+		}
 	}
 
 	cnt = cp -> ChStarMAX - pl;
