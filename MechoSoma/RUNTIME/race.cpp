@@ -916,16 +916,42 @@ void mchInitRaceDispatcher(void)
 			it per slot and the race numbers its cars in slot order, so the
 			list position is the slot. This covers the remote cars and agrees
 			with the local one set just above.
+
+			The spare slots are bots, and their mechos was drawn long before the
+			lobby existed - at application start. Reserve every seated player's
+			figure first, then give each bot a figure from what is left, so no
+			bot ever drives the same mechos as a player. Rebuilding the bot also
+			frees its old parts and draws them after the players', which keeps a
+			bot off a player's parts too.
 		*/
 		if(mchNetGame){
-			int slot = 0;
+			unsigned int taken_mask = 0;
+			int slot;
 
+			for(slot = 0; slot < HS_PLAYERS_MAX; slot ++){
+				int f = mchNetPlayerFigure(slot);
+
+				if(f > 0) taken_mask |= 1u << (f - 1);
+			}
+
+			slot = 0;
 			rs = mch_racerLst.first();
 			while(rs){
 				char net_cfg[32];
 
-				if(mchNetPlayerConfig(slot,net_cfg,sizeof(net_cfg)))
+				if(mchNetPlayerConfig(slot,net_cfg,sizeof(net_cfg))){
 					rs -> SetMechos(net_cfg);
+				}
+				else {
+					int fid = mchNetBotFigure(taken_mask);
+
+					if(fid >= 0){
+						rs -> PutMechos();
+						rs -> essenceID = fid;
+						taken_mask |= 1u << fid;
+						rs -> GetMechos();
+					}
+				}
 
 				rs = rs -> next;
 				slot ++;

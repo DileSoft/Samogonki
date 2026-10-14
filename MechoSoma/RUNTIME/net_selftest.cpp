@@ -1670,6 +1670,47 @@ static int net_test_client_lobby(FILE* f)
 	return ok;
 }
 
+/*
+	A bot slot must never take a figure a player already holds, and no two bots
+	may share one. The race asks mchNetBotFigure for each spare slot in turn,
+	passing back the mask of figures already spoken for; this drives the same
+	function the race does.
+*/
+extern int mchNetBotFigure(unsigned int taken_mask);
+extern int acsMaxEssenceID;
+
+static int net_test_bot_figure(FILE* f)
+{
+	unsigned int players = (1u << 1) | (1u << 3) | (1u << 7);
+	unsigned int taken = players;
+	int count = 0;
+	int i;
+
+	for(i = 0; i <= acsMaxEssenceID; i ++){
+		int g = mchNetBotFigure(taken);
+
+		if(g < 0) break;
+
+		if(g >= acsMaxEssenceID || (players & (1u << g)) || (taken & (1u << g))){
+			net_logf(f,"FAIL net_test_bot_figure: picked %d",g);
+			return 0;
+		}
+
+		taken |= 1u << g;
+		count ++;
+	}
+
+	// Exactly the figures outside the players' set must be placed.
+	if(count != acsMaxEssenceID - 3){
+		net_logf(f,"FAIL net_test_bot_figure: %d bots, expected %d",count,acsMaxEssenceID - 3);
+		return 0;
+	}
+
+	net_logf(f,"botfigure: %d bots placed around players 1,3,7",count);
+
+	return 1;
+}
+
 int net_selftest(void)
 {
 	const int big_size = 4096;
@@ -1699,6 +1740,7 @@ int net_selftest(void)
 	int got_spawn = 0;
 	int got_actor = 0;
 	int got_event = 0;
+	int got_botfig = 0;
 	int host_reliable = 0;
 	int keepalives = 0;
 
@@ -1902,12 +1944,16 @@ int net_selftest(void)
 	if(!got_event)
 		net_logf(f,"FAIL net_test_event");
 
-	ok = (got_welcome && got_fragment && got_input && got_lobby && got_menulobby && got_leave && got_client_lobby && got_snapshot && got_spawn && got_actor && got_event && host_reliable == 1 &&
+	got_botfig = net_test_bot_figure(f);
+	if(!got_botfig)
+		net_logf(f,"FAIL net_test_bot_figure");
+
+	ok = (got_welcome && got_fragment && got_input && got_lobby && got_menulobby && got_leave && got_client_lobby && got_snapshot && got_spawn && got_actor && got_event && got_botfig && host_reliable == 1 &&
 	      burst_sent == burst_total && burst_recv == burst_total && burst_gaps == 0 &&
 	      net_reliable_left(host) == 0 && net_reliable_left(client) == 0);
 
-	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d menulobby=%d leave=%d clientlobby=%d snapshot=%d spawn=%d actor=%d event=%d",
-		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_menulobby,got_leave,got_client_lobby,got_snapshot,got_spawn,got_actor,got_event);
+	net_logf(f,"welcome=%d reliable=delivered %d of 1 fragment=%d input=%d lobby=%d menulobby=%d leave=%d clientlobby=%d snapshot=%d spawn=%d actor=%d event=%d botfig=%d",
+		got_welcome,host_reliable,got_fragment,got_input,got_lobby,got_menulobby,got_leave,got_client_lobby,got_snapshot,got_spawn,got_actor,got_event,got_botfig);
 	net_logf(f,ok ? "RESULT: PASS" : "RESULT: FAIL");
 
 	if(f) fclose(f);

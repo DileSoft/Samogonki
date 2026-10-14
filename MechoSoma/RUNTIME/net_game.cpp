@@ -218,6 +218,13 @@ extern int mchNumLaps;
 extern int mchNumRacers;
 extern int mchNumRacersDef;
 
+// The racer roster the race builds its cars from. Named here so the grid log
+// below can say which slot drives which mechos figure.
+extern xtList<mchRacerStats> mch_racerLst;
+
+// How many mechos figures exist; a figure id is 0..acsMaxEssenceID-1.
+extern int acsMaxEssenceID;
+
 /*
 	Glue between the match layer and the game. Everything above this file is
 	protocol and below it is a running race; this is the seam.
@@ -339,6 +346,7 @@ static int net_client_ready = 0;
 static int net_last_player_count = -1;
 static int net_camera_set = 0;
 static int net_start_logged = 0;
+static int net_grid_logged = 0;
 
 /*
 	Lobby server client state. Declared here, above mchNetLobbyQuant, because
@@ -1878,6 +1886,56 @@ int mchNetPlayerConfig(int slot,char* out,int sz)
 	return 1;
 }
 
+/*
+	One line in net.log naming every grid slot's mechos figure and whether a
+	player or a bot drives it. The race builds its cars in slot order, so the
+	list position is the slot, the same mapping mchNetPlayerConfig uses.
+	Written once when the race starts, so a net game's cars can be told apart
+	in the log.
+*/
+void mchNetLogGrid(void)
+{
+	mchRacerStats* rs;
+	int slot = 0;
+	char line[200];
+
+	if(!mchNetGame) return;
+
+	line[0] = 0;
+
+	rs = mch_racerLst.first();
+	while(rs){
+		char item[40];
+		int f = mchNetPlayerFigure(slot);
+
+		sprintf(item,"%ss%d=f%d%s",slot ? " " : "",slot,rs -> essenceID,f > 0 ? "P" : "b");
+		strcat(line,item);
+
+		rs = rs -> next;
+		slot ++;
+	}
+
+	net_log("grid %s",line);
+}
+
+/*
+	The figure a bot slot should take: the first one no player holds and no
+	earlier bot has taken, and that the track allows. taken_mask has bit f set
+	for figure f. Returns -1 when every figure is spoken for, and the caller
+	then leaves the slot with whatever it already had.
+*/
+int mchNetBotFigure(unsigned int taken_mask)
+{
+	for(int f = 0; f < acsMaxEssenceID; f ++){
+		if(taken_mask & (1u << f)) continue;
+		if(mch_trackD && !mch_trackD -> FigureEnabled(f)) continue;
+
+		return f;
+	}
+
+	return -1;
+}
+
 // The host has pressed start; the client should be leaving the menu to load.
 int mchNetLobbyStarted(void)
 {
@@ -2232,6 +2290,7 @@ void mchNetFinit(void)
 	net_camera_set = 0;
 	net_last_player_count = -1;
 	net_start_logged = 0;
+	net_grid_logged = 0;
 	net_rnd_seeded = 0;
 	net_motion_have = 0;
 	net_local_auth_valid = 0;
@@ -2594,6 +2653,16 @@ void mchNetQuant(void)
 		net_log("%s: roster now %d player(s), state %d",
 			mchNetHost ? "host" : "client",players,net_match_S -> state());
 		}
+
+	/*
+		Once, on both machines, when the race is running: by now the race has
+		built its cars and both logs are open, so one line names the mechos
+		figure every slot actually got and whether a player drives it.
+	*/
+	if(!net_grid_logged && net_match_S -> state() == NET_MATCH_RUNNING){
+		net_grid_logged = 1;
+		mchNetLogGrid();
+	}
 
 	if(mchNetHost){
 		// Re-evaluated every frame, not only when the roster count changes:
