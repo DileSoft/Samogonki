@@ -1908,6 +1908,15 @@ void mchA_ShowEssenceEnergy(int x,int y,float phase,int alpha,int id)
 // redraw on screen elements after resolution change
 void mchReInitArcaneScreen(void)
 {
+	/*
+		With show_images=0 the option table applies the screen mode during
+		startup, before the arcane screen's objects have been built. The first
+		lookup is NULL there and the unguarded dereference crashes; wait for
+		the next call, when the screen exists.
+	*/
+	if(!mch_arcScrD || !mch_arcScrD -> objList || !mch_arcScrD -> objList -> search(AE_SMALL_RECT1))
+		return;
+
 	mch_arcScrD->objList->search(AE_SMALL_RECT1)->InitCoords("small_rect1");
 	mch_arcScrD->objList->search(AE_SMALL_RECT2)->InitCoords("small_rect2");
 	mch_arcScrD->objList->search(AE_BIG_RECT1)->InitCoords("big_rect1");
