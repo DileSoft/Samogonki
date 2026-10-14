@@ -131,4 +131,11 @@ void net_fx_resend_actors(void);
 void net_fx_field_attach(FieldSource* source);
 void net_fx_field_detach(FieldSource* source);
 
+/*
+	Host side: a replicated field moved or changed radius. Called from
+	BodyDispatcher::moveFieldSource/changeFieldSource. Throttled to the last
+	sent pose, so a field that follows its caster sends only real changes.
+*/
+void net_fx_field_update(FieldSource* source);
+
 #endif /* __NET_FX_H__ */

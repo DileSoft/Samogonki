@@ -97,6 +97,15 @@ struct netFxField
 	unsigned char type;
 	unsigned char variant;
 	FieldSource* source;
+
+	// Last pose and radius told to the clients, so a move or a radius change
+	// is only sent when it actually changed - the engine calls moveFieldSource
+	// every frame a field follows its caster.
+	float last_x;
+	float last_y;
+	float last_z;
+	float last_r;
+	unsigned int last_ms;
 };
 
 static netFxField net_fx_fields[NET_MAX_FIELDS];
@@ -923,6 +932,11 @@ void net_fx_field_attach(FieldSource* source)
 	net_fx_fields[net_fx_field_count].type = (unsigned char)type;
 	net_fx_fields[net_fx_field_count].variant = (unsigned char)variant;
 	net_fx_fields[net_fx_field_count].source = source;
+	net_fx_fields[net_fx_field_count].last_x = source -> position_().x;
+	net_fx_fields[net_fx_field_count].last_y = source -> position_().y;
+	net_fx_fields[net_fx_field_count].last_z = source -> position_().z;
+	net_fx_fields[net_fx_field_count].last_r = source -> radius_();
+	net_fx_fields[net_fx_field_count].last_ms = 0;
 	net_fx_field_count ++;
 
 	net_fx_queue_field_spawn(net_fx_fields[net_fx_field_count - 1].entity_id,
@@ -947,6 +961,42 @@ void net_fx_field_detach(FieldSource* source)
 
 	net_fx_fields[at] = net_fx_fields[net_fx_field_count - 1];
 	net_fx_field_count --;
+}
+
+/*
+	Host: a field moved or changed radius. The engine calls this every frame a
+	field follows its caster, so only a real change goes out, and no more than
+	once per actor-replication interval.
+*/
+void net_fx_field_update(FieldSource* source)
+{
+	unsigned int now = (unsigned int)clocki();
+	int at;
+	const Vect3f& p = source -> position_();
+	float r = source -> radius_();
+	netFxField* f;
+
+	if(!mchNetGame || !mchNetHost) return;
+
+	for(at = 0; at < net_fx_field_count; at ++)
+		if(net_fx_fields[at].source == source) break;
+	if(at >= net_fx_field_count) return;
+
+	f = &net_fx_fields[at];
+
+	if((int)(now - f -> last_ms) < 1000 / NET_ACTOR_REPL_HZ) return;
+
+	if(fabsf(p.x - f -> last_x) < 1.0f && fabsf(p.y - f -> last_y) < 1.0f &&
+	   fabsf(p.z - f -> last_z) < 1.0f && fabsf(r - f -> last_r) < 0.5f)
+		return;
+
+	f -> last_ms = now;
+	f -> last_x = p.x;
+	f -> last_y = p.y;
+	f -> last_z = p.z;
+	f -> last_r = r;
+
+	net_fx_queue_field_spawn(f -> entity_id,source,f -> type,f -> variant);
 }
 
 /* ------------------------------ client side ------------------------------ */
@@ -1004,7 +1054,21 @@ static void net_fx_create_field(const netSpawn* s,const Vect3f& pos)
 	int owner_id = net_fx_racer_body_id(s -> owner_slot == 255 ? -1 : (int)s -> owner_slot);
 	float radius = (float)s -> model_id / 4.0f;
 
-	if(net_fx_field_find(s -> entity_id) >= 0) return;
+	// A known field arriving again is a move or a radius change, not a spawn.
+	if(net_fx_field_count > 0){
+		int at = net_fx_field_find(s -> entity_id);
+
+		if(at >= 0){
+			FieldSource* fs = net_fx_fields[at].source;
+
+			if(fs && Mdisp){
+				Mdisp -> moveFieldSource(fs,pos);
+				Mdisp -> changeFieldSource(fs,radius);
+				}
+			return;
+			}
+		}
+
 	if(net_fx_field_count >= NET_MAX_FIELDS) return;
 
 	switch(s -> type){

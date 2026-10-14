@@ -282,6 +282,7 @@ void BodyDispatcher::moveFieldSource(FieldSource* source, const Vect3f& r)
 		bout < "moveFieldSource: " <= source -> type() < "\n";
 #endif
 	permanent_fields_grid.move(source, r); 
+	net_fx_field_update(source);
 } 
 void BodyDispatcher::changeFieldSource(FieldSource* source, float radius)
 {	
@@ -290,6 +291,7 @@ void BodyDispatcher::changeFieldSource(FieldSource* source, float radius)
 		bout < "changeFieldSource1: " <= source -> type() < "\n";
 #endif
 	permanent_fields_grid.change(source, radius); 
+	net_fx_field_update(source);
 } 
 void BodyDispatcher::changeFieldSource(FieldSource* source, const Vect3f& pos, float radius)
 {	
@@ -298,6 +300,7 @@ void BodyDispatcher::changeFieldSource(FieldSource* source, const Vect3f& pos, f
 		bout < "changeFieldSource2: " <= source -> type() < "\n";
 #endif
 	permanent_fields_grid.change(source, pos, radius); 
+	net_fx_field_update(source);
 } 
 void BodyDispatcher::deleteFieldSource(FieldSource* source)
 {	
