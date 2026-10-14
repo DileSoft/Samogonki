@@ -91,7 +91,16 @@ static void net_log_open(void)
 	// overwrite each other.
 	const char* name = mchNetHost ? "net-host.log" : "net-client.log";
 
-	net_log_file = fopen(name,"w");
+	// Appended, not truncated: a lobby that is created and left several times
+	// is exactly the run worth reading, and opening with "w" would throw away
+	// every attempt but the last. Each session starts with its own
+	// "net race start" line, so the attempts stay separable.
+	net_log_file = fopen(name,"a");
+
+	if(net_log_file){
+		fprintf(net_log_file,"\n==== %s session ====\n",mchNetHost ? "host" : "client");
+		fflush(net_log_file);
+	}
 }
 
 static void net_log_close(void)
@@ -374,6 +383,21 @@ static unsigned short net_lobby_host_port = 0;
 static int net_lobby_join_id = -1;	// client: match id it asked to join
 static unsigned int net_lobby_join_ms = 0;	// client: when the JOIN was last sent
 
+// Client: what a re-connect needs. The rendezvous parameters are saved when
+// the menu starts the join, because mchNetFinit frees the session that holds
+// them; and when the server first introduced a host, so the re-connect watch
+// can tell how long this client has been waiting for a slot.
+static char net_lobby_addr_saved[128] = "";
+static char net_lobby_name_saved[32] = "";
+static int net_lobby_figure_saved = 0;
+static int net_lobby_spells_saved[3] = { 0,0,0 };
+static unsigned int net_lobby_joined_ms = 0;
+
+// How long a client introduced to a host waits for a slot before starting the
+// whole connection over. Long enough to ride out a slow world load or one lost
+// retransmit, short enough not to leave the lobby sitting empty.
+static const int NET_LOBBY_RECONNECT_MS = 6000;
+
 // -netlobbyhost / -netlobbyjoin: drive the rendezvous path with no menu.
 // Test scaffolding, see mchNetLobbyAutoQuant.
 int mchNetLobbyAuto = 0;
@@ -399,6 +423,7 @@ static netLobbyKnock net_lobby_knock[NET_MAX_PLAYERS];
 static int net_lobby_knock_count = 0;
 static int net_lobby_seated_logged = 0;
 static int net_lobby_rebrowse = 0;	// client: a rejected pick sent it back to the list
+static int net_lobby_last_matches = -1;	// client: last list size logged
 
 // Last sampled position per slot, so the periodic log can say whether the
 // field is actually driving or just sitting there.
@@ -2203,11 +2228,23 @@ int mchNetLobbyServerJoin(const char* lobby_addr,const char* player_name,
 
 	if(!mchNetLobbyJoin("",player_name,figure,spells)) return 0;
 
+	// Kept for the re-connect watch: mchNetFinit frees the session these would
+	// have lived in, and a retry needs them to rebuild exactly the same join.
+	strncpy(net_lobby_addr_saved,lobby_addr ? lobby_addr : "",sizeof(net_lobby_addr_saved) - 1);
+	net_lobby_addr_saved[sizeof(net_lobby_addr_saved) - 1] = 0;
+	strncpy(net_lobby_name_saved,player_name ? player_name : "",sizeof(net_lobby_name_saved) - 1);
+	net_lobby_name_saved[sizeof(net_lobby_name_saved) - 1] = 0;
+	net_lobby_figure_saved = figure;
+	for(int i = 0; i < 3; i ++)
+		net_lobby_spells_saved[i] = spells ? spells[i] : 0;
+	net_lobby_joined_ms = 0;
+
 	net_lobby_mode = 1;
 	net_lobby_browse = 1;
 	net_lobby_joined = 0;
 	net_lobby_host_known = 0;
 	net_lobby_list_ms = 0;
+	net_lobby_last_matches = -1;
 	net_lobby_join_id = -1;
 
 	net_lobby_ensure();
@@ -2231,6 +2268,7 @@ void mchNetLobbyServerHangup(void)
 	net_lobby_knock_count = 0;
 	net_lobby_seated_logged = 0;
 	net_lobby_rebrowse = 0;
+	net_lobby_last_matches = -1;
 }
 
 static void net_lobby_knock_remember(unsigned int ip,unsigned short port)
@@ -2269,6 +2307,37 @@ static void net_lobby_knock_quant(unsigned int now)
 		k -> next_ms = now + 500;
 		k -> tries ++;
 		}
+}
+
+/*
+	Client: the introduction happened but no slot followed, so the rendezvous
+	did not survive the trip - the punch was dropped, or the HELLO never got
+	through. Rebuild the whole connection: a fresh game socket gets a fresh
+	public endpoint from the server, the host is introduced to it and punches
+	it, and the ordinary handshake runs again. This is what makes an empty
+	player list cure itself instead of sitting there.
+*/
+static void net_lobby_client_reconnect(void)
+{
+	int rejoin = net_lobby_join_id;
+	char addr[128];
+	char name[32];
+
+	// Copy first: mchNetLobbyServerJoin writes these same saved strings back
+	// from its arguments, and handing it its own buffer is an aliased copy.
+	strncpy(addr,net_lobby_addr_saved,sizeof(addr) - 1);
+	addr[sizeof(addr) - 1] = 0;
+	strncpy(name,net_lobby_name_saved,sizeof(name) - 1);
+	name[sizeof(name) - 1] = 0;
+
+	mchNetFinit();
+
+	mchNetLobbyServerJoin(addr,name,
+			      net_lobby_figure_saved,net_lobby_spells_saved);
+
+	// The re-connect targets the same game, so keep the id; if it is gone by
+	// now the server's "no match" reply sends this client back to the list.
+	net_lobby_join_id = rejoin;
 }
 
 /*
@@ -2326,6 +2395,26 @@ void mchNetMenuPump(void)
 		if((int)(now - net_lobby_list_ms) >= 2000){
 			net_lobby_list_ms = now;
 			net_lobby_S -> request_list();
+		}
+
+		// Log the list whenever its shape changes, so a stale or duplicate
+		// match - what a pick lands on when the host has re-created its game -
+		// is visible in the log rather than only in the menu.
+		if(net_lobby_S -> match_count() != net_lobby_last_matches){
+			char buf[256];
+			int i,n = 0,count = net_lobby_S -> match_count();
+
+			net_lobby_last_matches = count;
+			buf[0] = 0;
+
+			for(i = 0; i < count && n < 220; i ++){
+				const netLobbyMatch* m = net_lobby_S -> match(i);
+
+				if(m) n += snprintf(buf + n,sizeof(buf) - n," %u:%s(%u)",
+						    (unsigned)m -> id,m -> name,(unsigned)m -> players);
+			}
+
+			net_log("client: list now %d match(es):%s",count,buf);
 		}
 	}
 
@@ -2392,6 +2481,11 @@ void mchNetMenuPump(void)
 				net_lobby_host_known = 1;
 				net_lobby_joined = 1;
 
+				// Start the wait-for-a-slot clock when the first introduction
+				// lands; the re-connect watch below reads it.
+				if(!net_lobby_joined_ms)
+					net_lobby_joined_ms = now;
+
 				// Seated: no reason to keep listing matches.
 				net_lobby_browse = 0;
 			}
@@ -2417,6 +2511,22 @@ void mchNetMenuPump(void)
 	if(!mchNetHost && net_match_S && net_match_S -> local_slot() >= 0 && !net_lobby_seated_logged){
 		net_lobby_seated_logged = 1;
 		net_log("lobby client: seated in slot %d",net_match_S -> local_slot());
+		}
+
+	/*
+		Client: introduced to a host, but no slot has come. The player list
+		stays empty - the client does not even see itself, because it forces
+		its own row only once it has a slot - and it will stay that way: the
+		same socket keeps retrying the same punch. Start the whole connection
+		over instead, which hands the server a fresh public endpoint and gets
+		a fresh introduction.
+	*/
+	if(!mchNetHost && net_lobby_mode && net_lobby_joined && net_match_S &&
+	   net_match_S -> local_slot() < 0 && net_lobby_joined_ms &&
+	   (int)(now - net_lobby_joined_ms) >= NET_LOBBY_RECONNECT_MS){
+		net_log("client: no slot in %d ms, restarting the connection",
+			NET_LOBBY_RECONNECT_MS);
+		net_lobby_client_reconnect();
 		}
 }
 
@@ -2636,6 +2746,8 @@ void mchNetFinit(void)
 	net_lobby_knock_count = 0;
 	net_lobby_seated_logged = 0;
 	net_lobby_rebrowse = 0;
+	net_lobby_last_matches = -1;
+	net_lobby_joined_ms = 0;
 
 	net_log("net race end");
 	net_trace_close();
