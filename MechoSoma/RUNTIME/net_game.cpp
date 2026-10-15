@@ -720,9 +720,18 @@ static void net_interp_apply(int slot,mchMechosRacer* mr)
 
 	if(!b -> count) return;
 
+	/*
+		The pose is written exactly as the host sent it, never ground-snapped.
+		A remote car's z is the host's business, and the ground query at its
+		x, y can find a surface above it - under a bridge that surface is the
+		deck, so a remote car driving under one would rise onto it. This is
+		the same reason Body::setPositionExact exists, and the same one the
+		local car is posed with.
+	*/
+
 	// One snapshot so far: nothing to interpolate yet, so use it as it is.
 	if(b -> count == 1){
-		mr -> setPosition(b -> sample[0].pos,b -> sample[0].yaw);
+		mr -> setPositionExact(b -> sample[0].pos,b -> sample[0].yaw);
 		mr -> setGlobalVelocity(b -> sample[0].vel);
 		return;
 		}
@@ -736,14 +745,14 @@ static void net_interp_apply(int slot,mchMechosRacer* mr)
 	// Behind the oldest or ahead of the newest: hold the nearest end rather
 	// than extrapolate. A stall shows as the car pausing, never as a snap.
 	if(rt <= (float)b -> sample[0].tick){
-		mr -> setPosition(b -> sample[0].pos,b -> sample[0].yaw);
+		mr -> setPositionExact(b -> sample[0].pos,b -> sample[0].yaw);
 		mr -> setGlobalVelocity(b -> sample[0].vel);
 		return;
 		}
 
 	if(rt >= (float)b -> sample[b -> count - 1].tick){
 		i = b -> count - 1;
-		mr -> setPosition(b -> sample[i].pos,b -> sample[i].yaw);
+		mr -> setPositionExact(b -> sample[i].pos,b -> sample[i].yaw);
 		mr -> setGlobalVelocity(b -> sample[i].vel);
 		return;
 		}
@@ -766,7 +775,7 @@ static void net_interp_apply(int slot,mchMechosRacer* mr)
 	while(d < -(float)M_PI) d += 2.0f * (float)M_PI;
 	yaw += d * a;
 
-	mr -> setPosition(pos,yaw);
+	mr -> setPositionExact(pos,yaw);
 	mr -> setGlobalVelocity(vel);
 }
 
@@ -913,7 +922,10 @@ static void net_reconcile_local(void)
 	net_log("client: local car %.0f units from the host, snapping",
 		Vect3f(dx,dy,0.0f).norm());
 
-	mr -> setPosition(net_local_auth,net_local_auth_yaw);
+	// Exact pose, not the ground-snapped one: the host's z is the whole point
+	// of the snap, and a ground query here could hand back the deck of a bridge
+	// the car is under. setPosition() still clears the velocity and forces.
+	mr -> setPositionExact(net_local_auth,net_local_auth_yaw);
 
 	// setPosition() cleared the velocity; resume on the host's, or the car
 	// sits still after the cut while the host's copy drives off.
