@@ -748,6 +748,15 @@ void netMatch::force_start(void)
 	set_status("Starting");
 }
 
+void netMatch::finish(void)
+{
+	if(_state != NET_MATCH_RUNNING) return;
+
+	_state = NET_MATCH_FINISHED;
+
+	set_status("Finished");
+}
+
 void netMatch::free_lost_slots(void)
 {
 	for(int i = 1; i < _max_players; i ++){

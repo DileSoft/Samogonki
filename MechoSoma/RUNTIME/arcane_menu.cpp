@@ -3761,13 +3761,26 @@ void mchEndGame(void)
 		camera_dispatcher2 -> runFinishScenario();
 	}
 
-	mchA_TrackPart = mch_trackD -> TrackPart();
-	mchA_TrackPartPrice = mch_trackD -> TrackPrice();
-
-	if(mchA_TrackPart)
-		mchA_BonusMesh = mchGetPartByArcane(mchA_TrackPart);
-	else
+	/*
+		A net race awards no track part: there is no single-player progression
+		behind it, and every track carries a part, so leaving it set would send
+		the end screen down its buy-part branch and leave the Continue button -
+		the only way back to the menu - switched off.
+	*/
+	if(mchNetGame){
+		mchA_TrackPart = 0;
+		mchA_TrackPartPrice = 0;
 		mchA_BonusMesh = NULL;
+	}
+	else {
+		mchA_TrackPart = mch_trackD -> TrackPart();
+		mchA_TrackPartPrice = mch_trackD -> TrackPrice();
+
+		if(mchA_TrackPart)
+			mchA_BonusMesh = mchGetPartByArcane(mchA_TrackPart);
+		else
+			mchA_BonusMesh = NULL;
+	}
 
 	if(!mchSplitScreenGame && mchGameMode == MCH_SINGLE_GAME && !mchNetGame){
 		mchA_EndGameMode = AE_RACE_NOT_LOST;

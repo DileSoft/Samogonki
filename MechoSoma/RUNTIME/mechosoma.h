@@ -157,6 +157,19 @@ extern int mchNetBots;
 */
 extern int mchNetDestroy;
 /*
+	mchNetFinish seconds after the start at which the host's own racer is
+	declared finished and the race ended, so the whole post-race path - the
+	finish screen, the hand-over to the bots, the music - runs with nobody at
+	the keyboard. Set by -netfinish <sec>. 0 is off. Test scaffolding.
+*/
+extern int mchNetFinish;
+/*
+	mchNetLeave 1 = press the end screen's Continue button on a timer once the
+	race is over, so the return to the main menu runs without a human. Set by
+	-netleave. Test scaffolding.
+*/
+extern int mchNetLeave;
+/*
 	mchNetTrace 1 = write a per-tick CSV of every networked object's pose and
 	parameters, next to net.log, so a host and a client trace can be diffed.
 	Set by -netdump. Diagnostic only; costs nothing when off.

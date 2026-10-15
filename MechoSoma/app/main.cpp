@@ -168,6 +168,18 @@ int main(int argc, char const *argv[]) {
       if (strcmp(argv[i], "-netdestroy") == 0) {
           mchNetDestroy = 1;
       }
+      // -netfinish <sec> ends the host's race after that many seconds, so the
+      // post-race path (finish screen, bot hand-over, music) runs unattended.
+      // Test scaffolding.
+      if (strcmp(argv[i], "-netfinish") == 0 && i + 1 < argc) {
+          mchNetFinish = atoi(argv[i + 1]);
+      }
+      // -netleave presses the end screen's Continue button on a timer once the
+      // race is over, so the return to the main menu runs unattended. Test
+      // scaffolding.
+      if (strcmp(argv[i], "-netleave") == 0) {
+          mchNetLeave = 1;
+      }
       // -networld <id> picks the race world, so a bot test can run on worlds
       // other than the built-in default. Both machines must be given the same.
       if (strcmp(argv[i], "-networld") == 0 && i + 1 < argc) {

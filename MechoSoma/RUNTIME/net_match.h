@@ -74,6 +74,11 @@ public:
 	// by the practice path.
 	void force_start(void);
 
+	// The race is over. Stops the match being a running one, which is what
+	// keeps the game layer from forcing the clock back to MCH_TIME_RUNNING
+	// on the next frame and undoing the end screen. Idempotent.
+	void finish(void);
+
 	// A lobby, not a race-in-waiting: the roster does not start the match on
 	// its own, the host decides. See the menu lobby.
 	void set_manual_start(int on);

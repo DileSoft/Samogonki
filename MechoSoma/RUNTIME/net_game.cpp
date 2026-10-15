@@ -14,6 +14,7 @@
 
 #include "mechosoma.h"
 #include "race.h"
+#include "KEYS.H"
 #include "TrackDispatcher.h"
 #include "Mechos.h"
 #include "arcane.h"
@@ -34,6 +35,10 @@ extern void mchResumeSound(void);
 // The end-of-race screen, normally entered from the race dispatcher. The
 // client reaches it from here when the host says the race is over.
 void mchEndGame(void);
+
+// Set once mchEndGame has shown the finish screen. Read here so a net race
+// that has ended is never forced back to running.
+extern int mchGameFinit;
 
 // race.cpp: the finish fanfare (sound + effect) a machine plays for a racer it
 // did not simulate. Lives there because the audio headers already do.
@@ -294,6 +299,20 @@ int mchNetBots = 0;
 */
 int mchNetDestroy = 0;
 /*
+	-netfinish <sec>: declare the host's own racer finished that many seconds
+	after the start, so the whole post-race path runs with nobody at the
+	keyboard: the finish screen, the field handed to the bots, the music, and
+	the return to the main menu. Test scaffolding, no effect on a normal race.
+*/
+int mchNetFinish = 0;
+/*
+	-netleave: press the end screen's Continue button on a timer once the race
+	has ended, so a machine with no keyboard can walk the whole way back to the
+	main menu - the button, mchEndGameFinit, the world-7 reload and mchNetFinit.
+	Test scaffolding, no effect on a normal race.
+*/
+int mchNetLeave = 0;
+/*
 	-netdump: write a per-tick CSV of every networked object, so a host and a
 	client trace can be aligned on the host tick and compared field by field.
 
@@ -363,6 +382,13 @@ static int net_last_player_count = -1;
 static int net_camera_set = 0;
 static int net_start_logged = 0;
 static int net_grid_logged = 0;
+
+// -netfinish: when the host should declare its own racer finished, and
+// whether it already has. See int mchNetFinish, above.
+static unsigned int net_finish_at_ms = 0;
+static int net_finish_done = 0;
+static int net_endgame_logged = 0;
+static unsigned int net_leave_ms = 0;
 
 /*
 	Lobby server client state. Declared here, above mchNetLobbyQuant, because
@@ -1547,6 +1573,13 @@ void mchNetGameOver(void)
 		}
 
 	net_match_S -> sess() -> broadcast(NET_MSG_GAME_OVER,&msg,(unsigned int)sizeof(msg),1);
+
+	// The match is no longer a running one. Without this the game layer keeps
+	// reading state() == RUNNING and forces the clock back to MCH_TIME_RUNNING
+	// on the next frame, which puts the cars back under the players and hides
+	// the finish screen for good.
+	net_match_S -> finish();
+
 	net_log("host: race over, told the clients");
 }
 
@@ -1663,6 +1696,25 @@ static void net_apply_game_over(const netGameOver* msg,unsigned int len)
 	if(mchTimeMode == MCH_TIME_GAME_OVER) return;
 
 	mchEndGame();
+
+	// Same as the host: the match is over, so the start-tick forcing in
+	// mchNetQuant() must not pull the clock back to running and undo this.
+	net_match_S -> finish();
+
+	/*
+		mchEndGame hands this machine's own car to the AI, the same way the
+		single-player end screen does. Say so: a client whose car stayed under
+		the keyboard would look exactly like this working, right until someone
+		touched a key.
+	*/
+	{
+		mchRacer* rp = net_racer_at(net_match_S -> local_slot());
+
+		if(rp)
+			net_log("client: race ended, local car %s",
+				(rp -> flags & MCH_AI) ? "under the bot" : "still on the keyboard");
+	}
+
 	net_log("client: host ended the race");
 }
 
@@ -2887,6 +2939,26 @@ static void net_update_ai(void)
 }
 
 /*
+	Host side: the race is over. Hand every car to the AI, so the cars the
+	clients were driving keep driving instead of sitting under their last
+	input sample. AI_Toggle() flips the flag, so it is only called when the
+	car is not already a bot - the spare slots and the host's own car (which
+	mchEndGame just handed over) are left alone.
+*/
+static void net_endgame_ai(void)
+{
+	mchRacer* rp = mch_raceD -> racerLst -> first();
+
+	while(rp){
+		if(!(rp -> flags & MCH_AI))
+			mch_raceD -> AI_Toggle(rp,1);
+
+		rp -> set_net_control(0);
+		rp = rp -> next;
+		}
+}
+
+/*
 	Client side: read the local controls and send them, once per tick.
 
 	The sample is built from the raw controls rather than from what the
@@ -3101,19 +3173,71 @@ void mchNetQuant(void)
 	}
 
 	if(mchNetHost){
-		// Re-evaluated every frame, not only when the roster count changes:
-		// a client that connects just as the race starts can otherwise leave
-		// its car under AI for the first seconds, driving away from the car
-		// the client is already steering. Idempotent - it only toggles on a
-		// real change.
-		net_update_ai();
-		net_apply_host_inputs();
+		int mstate = net_match_S -> state();
+
+		// -netfinish: end the host's own race on a timer, so the post-race
+		// path is reachable without a human. The finish itself goes through
+		// the ordinary mchEndGame, which is what broadcasts GAME_OVER.
+		if(mchNetFinish && !net_finish_done && mstate == NET_MATCH_RUNNING){
+			if(!net_finish_at_ms)
+				net_finish_at_ms = now + (unsigned int)mchNetFinish * 1000u;
+
+			if((int)(now - net_finish_at_ms) >= 0){
+				net_finish_done = 1;
+				net_log("host: -netfinish ending the race after %d s",mchNetFinish);
+
+				if(mch_raceD -> activeRacer){
+					mch_raceD -> activeRacer -> flags |= MCH_FINISHED;
+					mchEndGame();
+					mstate = net_match_S -> state();
+					}
+				}
+			}
+
+		if(mstate == NET_MATCH_FINISHED){
+			/*
+				The race is over, so from here every car on the field is a
+				bot's. The single-player end screen hands the player's own car
+				to the AI (mchEndGame does the same on every machine); a host
+				has to do it for the cars the clients were driving too, or they
+				sit on the last input sample they sent.
+			*/
+			net_endgame_ai();
+
+			if(!net_endgame_logged){
+				mchRacer* rp = mch_raceD -> racerLst -> first();
+				char mask[NET_MAX_PLAYERS + 1];
+				int slot = 0;
+
+				net_endgame_logged = 1;
+
+				while(rp && slot < NET_MAX_PLAYERS){
+					mask[slot] = (rp -> flags & MCH_AI) ? 'b' : 'P';
+					rp = rp -> next;
+					slot ++;
+					}
+				mask[slot] = 0;
+
+				net_log("host: race ended, field handed to the bots [%s]",mask);
+				}
+			}
+		else {
+			// Re-evaluated every frame, not only when the roster count
+			// changes: a client that connects just as the race starts can
+			// otherwise leave its car under AI for the first seconds, driving
+			// away from the car the client is already steering. Idempotent -
+			// it only toggles on a real change.
+			net_update_ai();
+			net_apply_host_inputs();
+			}
 
 
 		// Snapshots only exist on the host: it is the only machine that knows
 		// where anything is. The actors go the same way, and only from here:
-		// a pass before the match is running would spawn them to nobody.
-		if(net_match_S -> state() == NET_MATCH_RUNNING){
+		// a pass before the match is running would spawn them to nobody. Both
+		// keep going after the finish, so every client sees the same field
+		// driving off the line it just crossed instead of a frozen grid.
+		if(mstate == NET_MATCH_RUNNING || mstate == NET_MATCH_FINISHED){
 			// -netdestroy: wreck two adjacent bot slots once, a moment after
 			// the start, so the destroy-assemble path runs unattended. They
 			// die on the same spot and reassemble from the same pile, which is
@@ -3142,7 +3266,9 @@ void mchNetQuant(void)
 			net_fx_update_actors();
 			}
 
-		if(net_match_S -> state() != NET_MATCH_LOBBY)
+		if(mstate == NET_MATCH_FINISHED)
+			mchNetStatusText = "Finished";
+		else if(mstate != NET_MATCH_LOBBY)
 			mchNetStatusText = "Racing";
 		}
 
@@ -3191,7 +3317,8 @@ void mchNetQuant(void)
 			}
 		}
 
-	if(!mchNetHost && net_client_ready)
+	if(!mchNetHost && net_client_ready &&
+	   net_match_S -> state() != NET_MATCH_FINISHED)
 		net_send_client_input();
 
 	// The host's standings moved, so the stars on the checkpoint the local car
@@ -3241,5 +3368,19 @@ void mchNetQuant(void)
 	if(net_match_S -> state() == NET_MATCH_STARTING && !net_start_logged){
 		net_start_logged = 1;
 		net_log("start handshake, tick to be %u",net_match_S -> start_tick());
+		}
+
+	/*
+		-netleave: the race is over and the end screen is up, but this machine
+		has no keyboard to press Continue with. Tap Return on a timer instead -
+		the same key a player would use - so the whole way back to the menu
+		runs. Test scaffolding.
+	*/
+	if(mchNetLeave && mchGameFinit){
+		if((int)(now - net_leave_ms) >= 400){
+			net_leave_ms = now;
+
+			if(KeyBuf) KeyBuf -> put(VK_RETURN,KBD_CUR_KEY_PRESSED);
+			}
 		}
 	}
