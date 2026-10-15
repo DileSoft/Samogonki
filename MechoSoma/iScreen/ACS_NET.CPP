@@ -865,13 +865,13 @@ static void nm_board_sync(void)
 			hsPlayers[i].type = 1;		// human
 		}
 		else {
-			// An empty slot is not shown as a bot. The board is the roster:
-			// only the players who are actually here appear, the rest read as
-			// disabled. Spare slots are still raced by bots when the flag
-			// drops, but that is the race's business, not the lobby's.
+			// An empty slot will be raced by a bot, so it reads as a computer
+			// player - but no mechos is drawn for it: the figure the bot gets
+			// is handed out at the start, and drawing one here would show a
+			// mechos nobody picked.
 			hsPlayers[i].name[0] = 0;
 			hsPlayers[i].configStr[0] = 0;
-			hsPlayers[i].type = 0;		// disabled
+			hsPlayers[i].type = 2;		// computer
 		}
 
 		// The mechos cell opens the assembly shop, and only this machine's
@@ -899,11 +899,11 @@ static void nm_board_sync(void)
 		}
 
 		// The type column is information here: a player is human, an empty
-		// slot is disabled. Nobody edits anybody's, their own included.
+		// slot is a computer. Nobody edits anybody's, their own included.
 		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_TYPE + i);
 		if(p){
 			p -> flags |= ACS_BLOCKED;
-			p -> CurState = present ? 1 : 0;
+			p -> CurState = present ? 1 : 2;
 			p -> flags |= ACS_REDRAW_OBJECT;
 		}
 	}

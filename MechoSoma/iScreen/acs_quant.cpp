@@ -1865,9 +1865,9 @@ void acsDrawHS_CfgScreen(void)
 	}
 
 	for(i = 0; i < HS_PLAYERS_MAX; i ++){
-		// Over the net lobby an empty slot is disabled and has no mechos to
-		// draw - the rows shown are the players, not the spare slots.
-		if(mchNetBoard && hsPlayers[i].type == 0) continue;
+		// Over the net lobby only a human row draws a mechos; a spare slot is
+		// a computer with no figure picked yet, so it has none to draw.
+		if(mchNetBoard && hsPlayers[i].type != 1) continue;
 
 		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_MECHOS + i);
 		if(p){
