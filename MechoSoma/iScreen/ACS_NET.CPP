@@ -900,11 +900,13 @@ static void nm_board_sync(void)
 
 		// The type column is information here: a player is human, an empty
 		// slot is a computer. Nobody edits anybody's, their own included.
+		// set_state, not CurState: the field draws its `string`, which only
+		// set_state rewrites - touching CurState alone left the hot-seat
+		// default (player 5 read "disabled" whatever the roster said).
 		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_TYPE + i);
 		if(p){
 			p -> flags |= ACS_BLOCKED;
-			p -> CurState = present ? 1 : 2;
-			p -> flags |= ACS_REDRAW_OBJECT;
+			p -> set_state(present ? 1 : 2);
 		}
 	}
 
@@ -1020,7 +1022,7 @@ static void nm_action(void)
 					nm_name[0] ? nm_name : "host",nm_game,
 					nm_fig,nm_sp);
 
-				if(ok){ nm_lobby = 1; nm_enter_board(); }
+				if(ok){ nm_lobby = 1; }
 			}
 			else {
 				ok = mchNetLobbyServerJoin(nm_lobby_addr,
@@ -1050,8 +1052,8 @@ static void nm_action(void)
 
 		if(ok){
 			nm_lobby = 1;
-			mchNetLobbySetGameName(nm_game);
-			nm_enter_board();
+			if(nm_host) mchNetLobbySetGameName(nm_game);
+			nm_refresh();
 		}
 		return;
 	}
@@ -1439,7 +1441,7 @@ void acsNetMenuQuant(void)
 		if(mchNetLobbyClientJoined()){
 			nm_browse = 0;
 			nm_lobby = 1;
-			nm_enter_board();
+			nm_refresh();
 			return;
 		}
 
@@ -1449,9 +1451,18 @@ void acsNetMenuQuant(void)
 
 	if(!nm_lobby) return;
 
-	// The session is up, so the lobby is the hot-seat board.
+	// The session is up, so the lobby is the hot-seat board. A client only
+	// has a seat once the host has welcomed it, and until then the board would
+	// be an empty roster; the setup screen, which shows the joining players,
+	// is the better waiting room. The host owns slot 0 from the start.
 	if(!nm_board){
-		nm_enter_board();
+		if(nm_host || mchNetLocalSlot() >= 0){
+			nm_enter_board();
+			return;
+		}
+
+		mchNetLobbyQuant();
+		nm_refresh();
 		return;
 	}
 
