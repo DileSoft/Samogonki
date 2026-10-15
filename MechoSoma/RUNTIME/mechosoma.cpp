@@ -430,6 +430,21 @@ float mchTimeSpeedMin = 0.33f;
 float mchTimeSpeedMax = 3.0f;
 float mchTimeSpeedDelta = 1.05f;
 
+// Every route that leaves a net race for the front end goes through here.
+// The menu RTO picks its screen from mch_iScreenID, and only the startup
+// menu (SCR0/1/2) carries the network row, so returning from a race has to
+// name it explicitly. Same save-count choice mchFinitDemo, mchRecorderDone
+// and mchInitOutro make. mchNetGame is still set when this runs.
+static void mchNetPrepareMainMenu(void)
+{
+	if(mch_iScreen){
+		int num = acsInitSaveSlots();
+		if(num < 1) mch_iScreenID = ACS_MAIN_MENU_SCR0;
+		if(num == 1) mch_iScreenID = ACS_MAIN_MENU_SCR1;
+		if(num > 1) mch_iScreenID = ACS_MAIN_MENU_SCR2;
+	}
+}
+
 int xtInitApplication(void)
 {
 	allocation_tracking("Start");
@@ -1081,8 +1096,11 @@ int GameQuantRTO::Quant(void)
 
 			if(mret == -1){
 				// The menu's "exit": leave the session and the race for the
-				// main menu. Going through the RTO's Finit runs mchNetFinit,
-				// the same clean teardown the single-player exit uses.
+				// front-end menu. Going through the RTO's Finit runs
+				// mchNetFinit, the same clean teardown the single-player
+				// exit uses. mchNetGame is still set, so the menu is told to
+				// show the startup screen rather than the in-game one.
+				mchNetPrepareMainMenu();
 				mchNetMenu = 0;
 				acsFinit();
 				XGR_MouseSetMoveHandler(mchMouseMove);
@@ -2633,20 +2651,31 @@ void mchGlobalQuant(void)
 		else {
 			if(mchTimeMode == MCH_TIME_GAME_OVER){
 				mchFreeResourcesFlag = 1;
-				if((mchGameMode == MCH_SPLIT_CONTROL_HS || mchGameMode == MCH_ENTIRE_CONTROL_HS) && mch_iScreenID != -1){
-					if(!mchPBEM_Game && mch_iScreen)
-						quantRTO -> NextID = RTO_MAIN_MENU_ID;
+				if(mchNetGame){
+					// A net race has no iWorld hub to fall back into. The end
+					// screen's Continue returns to the front-end menu (the one
+					// with the network row), the same target the in-race Escape
+					// menu exits to. mchCurrentWorld is left on the race world
+					// so the net menu still defaults to it next time.
+					mchNetPrepareMainMenu();
+					quantRTO -> NextID = RTO_MAIN_MENU_ID;
+				}
+				else {
+					if((mchGameMode == MCH_SPLIT_CONTROL_HS || mchGameMode == MCH_ENTIRE_CONTROL_HS) && mch_iScreenID != -1){
+						if(!mchPBEM_Game && mch_iScreen)
+							quantRTO -> NextID = RTO_MAIN_MENU_ID;
+						else
+							quantRTO -> NextID = -1;
+					}
 					else
+						mchSetNextQuantRTO();
+
+					mchCurrentWorld = mchNextWorld;
+					mchCurrentTrack = mchNextTrack;
+
+					if(mchNextWorld == 7 && !mch_iScreen)
 						quantRTO -> NextID = -1;
 				}
-				else
-					mchSetNextQuantRTO();
-
-				mchCurrentWorld = mchNextWorld;
-				mchCurrentTrack = mchNextTrack;
-
-				if(mchNextWorld == 7 && !mch_iScreen)
-					quantRTO -> NextID = -1;
 			}
 			else {
 				if(mchGameMode != MCH_ENTIRE_CONTROL_HS || mch_raceD -> isActiveRacerLast()){
