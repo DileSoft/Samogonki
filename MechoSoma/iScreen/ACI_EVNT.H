@@ -95,6 +95,9 @@
 #define ACS_EXT_INIT_ONLINE_MENU		55
 #define ACS_EXT_OPEN_SITE			56
 #define ACS_EXT_NET_MENU			57
+#define ACS_EXT_NET_BOARD_START			58
+#define ACS_EXT_NET_BOARD_BACK			59
+#define ACS_EXT_NET_BOARD_WORLD			60
 
 // Options
 #define ACS_OPT_RESOLUTION			0

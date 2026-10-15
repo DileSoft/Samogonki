@@ -73,7 +73,7 @@ const unsigned short NET_MAGIC		= 0x4D52;	// 'MR'
 // with, so the client's copy does not treat its own caster as a target. A peer
 // of another version is refused in the handshake rather than read with the
 // wrong layout.
-const unsigned int NET_PROTO_VERSION	= 11;
+const unsigned int NET_PROTO_VERSION	= 12;
 
 // Reliable retransmission, milliseconds since clocki().
 const int NET_RETRANSMIT_MS			= 300;
@@ -221,6 +221,13 @@ struct netRosterHeader
 	// The host's game name, sent with every roster so a renaming in the lobby
 	// reaches everybody without a message of its own.
 	unsigned char game_name[NET_SERVER_NAME_LEN];
+
+	// The world the host has picked, carried the same way as the game name so
+	// a change on the lobby's world arrows reaches the clients live. Before
+	// this it travelled only in the welcome and in the start message, so a
+	// client showed a stale world until the flag dropped.
+	unsigned char world_id;
+	unsigned char track_id;
 };
 
 struct netRosterEntry

@@ -2193,6 +2193,31 @@ void mchNetLobbySetGameName(const char* name)
 	if(net_match_S && mchNetHost) net_match_S -> set_game_name(name);
 }
 
+// The lobby board's world arrows. Host only: the world is the host's pick,
+// and set_world now broadcasts it in the roster so the clients follow live.
+// mchNetMenuWorld is the menu's pick and what mchNetArmRaceWorld fixes the
+// race to, so it moves with the arrows too - otherwise pressing start would
+// put the race back on the world the menu opened with.
+void mchNetLobbySetWorld(int world,int track)
+{
+	mchNetMenuWorld = world;
+	mchNetMenuTrack = track;
+
+	if(net_match_S && mchNetHost)
+		net_match_S -> set_world((unsigned char)world,(unsigned char)track,
+					 (unsigned char)(mchNumLaps > 0 ? mchNumLaps : 5));
+}
+
+int mchNetLobbyWorld(void)
+{
+	return net_match_S ? net_match_S -> world_id() : 0;
+}
+
+int mchNetLobbyTrack(void)
+{
+	return net_match_S ? net_match_S -> track_id() : 0;
+}
+
 const char* mchNetGameName(void)
 {
 	return net_match_S ? net_match_S -> game_name() : "";

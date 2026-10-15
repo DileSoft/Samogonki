@@ -352,6 +352,12 @@ void netMatch::set_world(unsigned char world_id,unsigned char track_id,unsigned 
 	_world_id = world_id;
 	_track_id = track_id;
 	_laps = laps;
+
+	// The world can change on the lobby board; push it to the clients now
+	// rather than waiting for the roster heartbeat. The callers that fix the
+	// world right before the start are on the host too, so this is a no-op
+	// there at worst.
+	if(_is_host) roster_changed();
 }
 
 void netMatch::set_local_player(const char* name,int figure,const int* spells)
@@ -491,6 +497,11 @@ int netMatch::handle_client_message(int type,const void* data,unsigned int len)
 
 			strncpy(_game_name,(const char*)hdr -> game_name,NET_SERVER_NAME_LEN - 1);
 			_game_name[NET_SERVER_NAME_LEN - 1] = 0;
+
+			// The host owns the world, and the roster carries its current
+			// pick so a change on the lobby board is seen before the start.
+			_world_id = hdr -> world_id;
+			_track_id = hdr -> track_id;
 
 			reset_roster();
 
@@ -649,6 +660,8 @@ void netMatch::send_roster(int reliable)
 	hdr -> count = (unsigned char)_count;
 	hdr -> flags = 0;
 	hdr -> server_tick = _sess -> tick();
+	hdr -> world_id = _world_id;
+	hdr -> track_id = _track_id;
 
 	memset(hdr -> game_name,0,NET_SERVER_NAME_LEN);
 	strncpy((char*)hdr -> game_name,_game_name,NET_SERVER_NAME_LEN - 1);

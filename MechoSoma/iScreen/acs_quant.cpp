@@ -1922,6 +1922,11 @@ void acsInitShop(int pl)
 	acsShopFlag = 1;
 }
 
+// The net lobby board (ACS_NET.CPP) reuses this shop for the local player's
+// mechos; there the pick goes to the lobby instead of hotseat.ini.
+extern int mchNetBoard;
+void mchNetBoardPushMechos(int slot);
+
 void acsFinitShop(int mode)
 {
 	char* str;
@@ -1934,9 +1939,17 @@ void acsFinitShop(int mode)
 		strcpy(hsPlayers[acsShopPlayer].configStr,str);
 		delete str;
 
-		XBuf < "player" <= acsShopPlayer + 1;
-		cfg_str < "\"" < hsPlayers[acsShopPlayer].configStr < "\"";
-		putIniKey(mch_hotseatINI,XBuf.address(),"mechos_config",cfg_str);
+		if(mchNetBoard){
+			// Over the net board the mechos is the local player's pick and
+			// belongs in the lobby roster, not in the hot-seat file - writing
+			// it there would quietly change the hot-seat defaults too.
+			mchNetBoardPushMechos(acsShopPlayer);
+		}
+		else {
+			XBuf < "player" <= acsShopPlayer + 1;
+			cfg_str < "\"" < hsPlayers[acsShopPlayer].configStr < "\"";
+			putIniKey(mch_hotseatINI,XBuf.address(),"mechos_config",cfg_str);
+		}
 	}
 	else
 		strcpy(hsPlayers[acsShopPlayer].configStr,acsShopCfgBackup);

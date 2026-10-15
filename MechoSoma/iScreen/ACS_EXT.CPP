@@ -211,6 +211,10 @@ void acsInitNetMenu(void);
 int acsNetMenuKey(int key);
 int acsNetMenuExtEvent(int row,int dir);
 void acsNetMenuQuant(void);
+int acsNetBoardActive(void);
+void acsNetBoardStart(void);
+void acsNetBoardBack(void);
+void acsNetBoardWorld(int dir);
 
 void acsInitShop(int pl);
 void acsFinitShop(int mode = 0);
@@ -925,6 +929,15 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 		case ACS_EXT_NET_MENU:
 			acsNetMenuExtEvent(data0,data1);
 			break;
+		case ACS_EXT_NET_BOARD_START:
+			acsNetBoardStart();
+			break;
+		case ACS_EXT_NET_BOARD_BACK:
+			acsNetBoardBack();
+			break;
+		case ACS_EXT_NET_BOARD_WORLD:
+			acsNetBoardWorld(data0);
+			break;
 		case ACS_EXT_CHANGE_PLAYER:
 			mchGameFlags |= MCH_STOP_TIME_FLAG | MCH_TOGGLE_PAUSE_FLAG;
 			mchPBEM_SetFlag(PBEM_CHANGE_PLAYER);
@@ -1019,7 +1032,12 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 			mchTurnBasedGame = data0;
 			break;
 		case ACS_EXT_INIT_RACERS:
-			mchInitRacers();
+			// The hot-seat board's GO opens the shop's neighbours; over the
+			// net board the same button starts the net race instead.
+			if(acsNetBoardActive())
+				acsNetBoardStart();
+			else
+				mchInitRacers();
 			break;
 		case ACS_EXT_SAVE_GAME:
 			acsCurSave = data1;
@@ -1505,8 +1523,13 @@ int acsQuant(void)
 	}
 
 	// The network lobby, once a frame while its screen is up: it pumps the
-	// session and pulls the roster into the list. See ACS_NET.CPP.
-	if(acsScrD -> curScr && acsScrD -> curScr -> ID == ACS_NET_GAME_SCR)
+	// session and pulls the roster into the list. The lobby itself lives on
+	// the hot-seat board over a live session, and the assembly shop is reached
+	// from it, so those screens get the same call. See ACS_NET.CPP.
+	if(acsScrD -> curScr &&
+	   (acsScrD -> curScr -> ID == ACS_NET_GAME_SCR ||
+	    ((acsScrD -> curScr -> ID == ACS_SPLIT_HS_SCR ||
+	      acsScrD -> curScr -> ID == ACS_CONSTRUCT_SCR) && acsNetBoardActive())))
 		acsNetMenuQuant();
 
 	ret = acsScrD -> Quant();

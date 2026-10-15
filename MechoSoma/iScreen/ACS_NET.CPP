@@ -371,8 +371,8 @@ static void nm_cycle_world(int dir)
 // The candidate chain, in the order the cursor walks it. Only the visible ones
 // are linked, so hiding a row drops it out of keyboard navigation for free.
 static const int nm_chain[] = {
-	NM_GAMENAME, NM_CONN, NM_HOST, NM_ADDR, NM_NAME, NM_FIG,NM_SP1,NM_SP2,NM_SP3,
-	NM_WORLD, NM_LIST0, NM_LIST1, NM_LIST2, NM_LIST3, NM_LIST4, NM_ACTION, NM_BACK
+	NM_GAMENAME, NM_CONN, NM_HOST, NM_ADDR, NM_NAME,
+	NM_LIST0, NM_LIST1, NM_LIST2, NM_LIST3, NM_LIST4, NM_ACTION, NM_BACK
 };
 
 // Whether the cursor may land on a row right now.
@@ -390,9 +390,7 @@ static int nm_row_visible(int id)
 	// The address is the host to join (a direct client) or the server to
 	// reach (either role, in lobby mode).
 	if(id == NM_ADDR)     return !nm_lobby && (nm_conn ? 1 : !nm_host);
-	if(id == NM_NAME || id == NM_FIG ||
-	   id == NM_SP1 || id == NM_SP2 || id == NM_SP3) return !nm_lobby;
-	if(id == NM_WORLD)    return nm_host && !nm_lobby;
+	if(id == NM_NAME)     return !nm_lobby;
 	if(id == NM_ACTION || id == NM_BACK) return 1;
 	return 0;
 }
@@ -440,8 +438,7 @@ static void nm_apply_visibility(void)
 	}
 
 	// Every row that is not a plain label has a label object too.
-	const int rows[] = { NM_CONN,NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,
-			     NM_WORLD,NM_GAMENAME,NM_PLAYHDR };
+	const int rows[] = { NM_CONN,NM_HOST,NM_ADDR,NM_NAME,NM_GAMENAME,NM_PLAYHDR };
 	for(i = 0; i < (int)(sizeof(rows)/sizeof(rows[0])); i ++){
 		int id = rows[i];
 		int on;
@@ -650,6 +647,345 @@ static void nm_capture_local(void)
 	mchNetMenuTrack = 0;
 }
 
+/* ------------------------------ lobby board ------------------------------ */
+
+/*
+	The lobby proper is the hot-seat board.
+
+	Once the session is up - the host has created the game, a client has been
+	seated - the screen switches to the shipped hot-seat board
+	(ACS_SPLIT_HS_SCR). It already draws exactly what a lobby needs: one line
+	per slot with the mechos and its arcane symbols, the player's name and a
+	human/computer/disabled column, plus the world arrows. The board's own
+	drawing code (acsDrawHS_CfgScreen) renders hsPlayers[], so the roster is
+	written into hsPlayers[] every frame and the board follows for free.
+
+	The differences from a hot-seat game, all kept behind the net flag:
+
+	* Only this machine's own row can be edited. Clicking its mechos opens the
+	  shipped assembly shop (ACS_CONSTRUCT_SCR); everybody else's row is
+	  blocked. The name is edited on the setup screen, not here.
+	* Empty slots race as bots, so they read as computer players; their mechos
+	  cell is only a placeholder - the real figure is handed out at the start.
+	* The world arrows are the host's, and travel to the clients in the roster.
+	* "Start" starts the net race; "Back" drops the session and returns to the
+	  setup screen.
+
+	The board keeps the same screens the hot-seat game uses, so its few baked
+	events that leave for hot-seat places - Back and Start - are replaced for
+	as long as the board is up and put back when it is left.
+*/
+
+// mchNetBoard tells the assembly shop (acs_quant.cpp) that the mechos it is
+// editing belongs to the lobby, not to hotseat.ini.
+int mchNetBoard = 0;
+
+static int nm_board = 0;		// the session is up, the board is the screen
+static int nm_board_inited = 0;
+
+int acsNetBoardActive(void)
+{
+	return nm_board;
+}
+
+// The local pick, held on the board until the roster carries it back, so a
+// client's new mechos does not flicker to the old one while its HELLO is on
+// the wire.
+static int nm_pend = 0;
+static int nm_pend_fig = 0;
+static int nm_pend_sp[3] = { 0, 0, 0 };
+
+// hsPlayers is the board's drawing model, so the roster is written into it.
+// The hot-seat game shares that array, so it is saved on entering the board
+// and put back on leaving; a net lobby must not change what a hot-seat game
+// that follows in the same run finds there.
+static hsPlayerData nm_hs_backup[HS_PLAYERS_MAX];
+static int nm_hs_saved = 0;
+
+/*
+	The two board buttons whose baked events lead away from the net game - Back
+	goes to the hot-seat multiplayer screen, Start builds hot-seat racers - get
+	a net event of their own while the board is up. The shipped events are kept
+	and put back on leaving, so the hot-seat game still finds its screen intact.
+*/
+struct nmOvEntry {
+	aciScreenObject* obj;
+	aciScreenEvent* saved[8];
+	int n;
+	aciScreenEvent* mine;
+};
+
+#define NM_OV_MAX	4
+static nmOvEntry nm_ov[NM_OV_MAX];
+static int nm_ov_n = 0;
+static int nm_ov_active = 0;
+
+static aciScreenEvent* nm_new_event(int ext_code,int d0,int k0,int k1,int k2)
+{
+	aciScreenEvent* ev = new aciScreenEvent;
+	aciScreenEventCommand* c = new aciScreenEventCommand;
+
+	if(k0) ev -> AddKey(k0,0);
+	if(k1) ev -> AddKey(k1,0);
+	if(k2) ev -> AddKey(k2,0);
+	ev -> MaxTimer = 1;
+
+	c -> code = ACS_EXT_EVENT;
+	c -> data[0] = ext_code;
+	c -> data[1] = d0;
+	c -> data[2] = 0;
+	c -> data[3] = 0;
+	c -> StartTimer = 0;
+
+	ev -> AddCommand(c);
+	return ev;
+}
+
+static void nm_override(aciScreenObject* obj,int ext_code,int d0,int k0,int k1,int k2)
+{
+	nmOvEntry* e;
+	aciScreenEvent* ev;
+
+	if(!obj || nm_ov_n >= NM_OV_MAX) return;
+
+	e = &nm_ov[nm_ov_n ++];
+	e -> obj = obj;
+	e -> n = 0;
+
+	ev = (aciScreenEvent*)obj -> events -> fPtr;
+	while(ev && e -> n < (int)(sizeof(e -> saved)/sizeof(e -> saved[0]))){
+		e -> saved[e -> n ++] = ev;
+		ev = (aciScreenEvent*)ev -> next;
+	}
+
+	obj -> events -> ClearList();
+	e -> mine = nm_new_event(ext_code,d0,k0,k1,k2);
+	obj -> AddEvent(e -> mine);
+
+	nm_ov_active = 1;
+}
+
+// Put the shipped events back. Deliberately does not free the replacement
+// events: this can run from inside one of their command sequences, and the
+// freed event would be read on return. They are few and only leaks a handful
+// per lobby.
+static void nm_restore_board_events(void)
+{
+	int i,j;
+
+	if(!nm_ov_active) return;
+
+	for(i = 0; i < nm_ov_n; i ++){
+		if(!nm_ov[i].obj) continue;
+
+		nm_ov[i].obj -> events -> ClearList();
+		for(j = 0; j < nm_ov[i].n; j ++)
+			nm_ov[i].obj -> AddEvent(nm_ov[i].saved[j]);
+	}
+
+	nm_ov_active = 0;
+}
+
+static void nm_board_init(void)
+{
+	aciScreen* scr = acsScrD -> GetScreen(ACS_SPLIT_HS_SCR);
+
+	if(!scr) return;
+
+	nm_ov_n = 0;
+	nm_ov_active = 0;
+	nm_ensure_pool();
+
+	nm_override(scr -> GetObject(ACS_BACK_OPTION),ACS_EXT_NET_BOARD_BACK,0,
+		    VK_MOUSE_LBUTTON,VK_MOUSE_RBUTTON,VK_ESCAPE);
+	nm_override(scr -> GetObject(ACS_NEW_GAME_OPTION),ACS_EXT_NET_BOARD_START,0,
+		    VK_MOUSE_LBUTTON,VK_MOUSE_RBUTTON,VK_RETURN);
+
+	nm_board_inited = 1;
+}
+
+static void nm_board_finish(void)
+{
+	nm_board = 0;
+	nm_board_inited = 0;
+	mchNetBoard = 0;
+	nm_pend = 0;
+	nm_restore_board_events();
+
+	// Hand hsPlayers back to the hot-seat game untouched.
+	if(nm_hs_saved){
+		memcpy(hsPlayers,nm_hs_backup,sizeof(nm_hs_backup));
+		nm_hs_saved = 0;
+	}
+}
+
+static void nm_enter_board(void)
+{
+	// Keep the hot-seat rows before the roster overwrites them.
+	memcpy(nm_hs_backup,hsPlayers,sizeof(nm_hs_backup));
+	nm_hs_saved = 1;
+
+	nm_board = 1;
+	nm_board_inited = 0;
+	mchNetBoard = 1;
+	acsScrD -> PrepareChangeScreen(ACS_SPLIT_HS_SCR);
+}
+
+static void nm_board_sync(void)
+{
+	aciScreen* scr = acsScrD -> GetScreen(ACS_SPLIT_HS_SCR);
+	aciScreenInputField* p;
+	int local = mchNetLocalSlot();
+	int i;
+
+	if(!scr) return;
+
+	// The board's world label reads hsWorld/hsTrack.
+	hsWorld = mchNetLobbyWorld();
+	hsTrack = mchNetLobbyTrack();
+
+	for(i = 0; i < HS_PLAYERS_MAX; i ++){
+		int fig = mchNetPlayerFigure(i);
+		int present = (fig > 0);
+
+		if(present){
+			const char* nm = mchNetPlayerName(i);
+
+			strncpy(hsPlayers[i].name,nm && nm[0] ? nm : "player",sizeof(hsPlayers[i].name) - 1);
+			hsPlayers[i].name[sizeof(hsPlayers[i].name) - 1] = 0;
+
+			if(local == i && nm_pend){
+				sprintf(hsPlayers[i].configStr,"%d %d %d %d",
+					nm_pend_fig,nm_pend_sp[0],nm_pend_sp[1],nm_pend_sp[2]);
+			}
+			else if(!mchNetPlayerConfig(i,hsPlayers[i].configStr,sizeof(hsPlayers[i].configStr))){
+				hsPlayers[i].configStr[0] = 0;
+			}
+
+			hsPlayers[i].type = 1;		// human
+		}
+		else {
+			// A spare slot races as a bot, drawn here as a computer player.
+			// The figure is only a placeholder; the race hands the bot one
+			// that no player holds when the flag drops.
+			int f = i + 1;
+			if(f > acsMaxEssenceID) f = (f % acsMaxEssenceID) + 1;
+
+			sprintf(hsPlayers[i].configStr,"%d %d %d %d",f,
+				nm_first_spell(0),nm_first_spell(1),nm_first_spell(2));
+			hsPlayers[i].name[0] = 0;
+			hsPlayers[i].type = 2;		// computer
+		}
+
+		// The mechos cell opens the assembly shop, and only this machine's
+		// own row may. Every other row is left for reading.
+		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_MECHOS + i);
+		if(p){
+			if(local == i) p -> flags &= ~(ACS_BLOCKED | ACS_HIDDEN);
+			else           p -> flags |=  ACS_BLOCKED;
+			p -> flags |= ACS_REDRAW_OBJECT;
+		}
+
+		// Names stay on the setup screen.
+		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_NAME + i);
+		if(p) p -> flags |= ACS_BLOCKED;
+
+		// The type column is information here: a player is human, a spare
+		// slot is a computer. Nobody edits anybody's, their own included.
+		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_TYPE + i);
+		if(p){
+			p -> flags |= ACS_BLOCKED;
+			p -> CurState = present ? 1 : 2;
+			p -> flags |= ACS_REDRAW_OBJECT;
+		}
+	}
+
+	// Start and the world arrows are the host's.
+	{
+		aciScreenObject* o = scr -> GetObject(ACS_NEW_GAME_OPTION);
+		if(o) o -> flags = nm_host ? (o -> flags & ~(ACS_BLOCKED | ACS_HIDDEN))
+					   : (o -> flags | ACS_BLOCKED | ACS_HIDDEN);
+
+		o = scr -> GetObject(2);	// world previous
+		if(o) o -> flags = nm_host ? (o -> flags & ~(ACS_BLOCKED | ACS_HIDDEN))
+					   : (o -> flags | ACS_BLOCKED | ACS_HIDDEN);
+
+		o = scr -> GetObject(3);	// world next
+		if(o) o -> flags = nm_host ? (o -> flags & ~(ACS_BLOCKED | ACS_HIDDEN))
+					   : (o -> flags | ACS_BLOCKED | ACS_HIDDEN);
+	}
+
+	// Drop the local override once the roster carries the same pick.
+	if(nm_pend && local >= 0){
+		char cfg[32];
+
+		if(mchNetPlayerFigure(local) == nm_pend_fig &&
+		   mchNetPlayerConfig(local,cfg,sizeof(cfg))){
+			int f,s1,s2,s3;
+
+			if(sscanf(cfg,"%d %d %d %d",&f,&s1,&s2,&s3) == 4 &&
+			   s1 == nm_pend_sp[0] && s2 == nm_pend_sp[1] && s3 == nm_pend_sp[2])
+				nm_pend = 0;
+		}
+	}
+}
+
+/*
+	The assembly shop's OK, routed here: the local mechos goes into the lobby
+	roster instead of hotseat.ini. Called from acsFinitShop when mchNetBoard is
+	set.
+*/
+void mchNetBoardPushMechos(int slot)
+{
+	int fig = 0,sp[3] = { 0, 0, 0 };
+
+	if(slot != mchNetLocalSlot()) return;
+	if(sscanf(hsPlayers[slot].configStr,"%d %d %d %d",&fig,&sp[0],&sp[1],&sp[2]) != 4) return;
+	if(fig <= 0) return;
+
+	mchNetLobbySetLocal(0,fig,sp);
+
+	// Keep it on the board until the roster agrees; see nm_board_sync.
+	nm_pend = 1;
+	nm_pend_fig = fig;
+	nm_pend_sp[0] = sp[0];
+	nm_pend_sp[1] = sp[1];
+	nm_pend_sp[2] = sp[2];
+}
+
+void acsNetBoardWorld(int dir)
+{
+	mchTrackInfo* p;
+
+	if(!nm_board || !nm_host || !mch_trackD) return;
+
+	p = dir ? mch_trackD -> NextTrack(hsWorld,hsTrack)
+		: mch_trackD -> PrevTrack(hsWorld,hsTrack);
+
+	if(p) mchNetLobbySetWorld(p -> World(),p -> Track());
+}
+
+void acsNetBoardStart(void)
+{
+	if(!nm_board || !nm_host) return;
+
+	mchNetLobbyHostStart();
+	nm_board_finish();
+	nm_lobby = 0;
+	nm_leave_to_race();
+}
+
+void acsNetBoardBack(void)
+{
+	if(!nm_board) return;
+
+	mchNetLobbyClose();
+	nm_board_finish();
+	nm_lobby = 0;
+	acsScrD -> PrepareChangeScreen(ACS_NET_GAME_SCR);
+	nm_refresh();
+}
+
 // The action button. Host: create the lobby, then start it. Client: connect,
 // then leave the lobby.
 static void nm_action(void)
@@ -676,7 +1012,7 @@ static void nm_action(void)
 					nm_name[0] ? nm_name : "host",nm_game,
 					nm_fig,nm_sp);
 
-				if(ok){ nm_lobby = 1; nm_refresh(); }
+				if(ok){ nm_lobby = 1; nm_enter_board(); }
 			}
 			else {
 				ok = mchNetLobbyServerJoin(nm_lobby_addr,
@@ -707,7 +1043,7 @@ static void nm_action(void)
 		if(ok){
 			nm_lobby = 1;
 			mchNetLobbySetGameName(nm_game);
-			nm_refresh();
+			nm_enter_board();
 		}
 		return;
 	}
@@ -856,11 +1192,12 @@ void acsInitNetMenu(void)
 	nm_add_field(scr,proto,NM_LBL(NM_GAMENAME),lx,70,w,32);
 	nm_add_field(scr,proto,NM_GAMENAME,vx,70,w,NET_GAME_NAME_LEN);
 
-	// Setup rows. One more than before (the link choice), so the pitch is a
-	// touch tighter to keep clear of the status line.
+	// Setup rows. Mechos, its arcanes and the world moved to the lobby board
+	// (the hot-seat screen); the setup keeps only what has to be known before
+	// the session opens - how to reach the other side, a name and a game name.
 	y = 100;
 	{
-		const int rows[] = { NM_CONN,NM_HOST,NM_ADDR,NM_NAME,NM_FIG,NM_SP1,NM_SP2,NM_SP3,NM_WORLD };
+		const int rows[] = { NM_CONN,NM_HOST,NM_ADDR,NM_NAME };
 		for(i = 0; i < (int)(sizeof(rows)/sizeof(rows[0])); i ++){
 			nm_add_field(scr,proto,NM_LBL(rows[i]),lx,y,w,32);
 			nm_add_field(scr,proto,rows[i],vx,y,w,110);
@@ -1080,9 +1417,11 @@ void acsNetMenuQuant(void)
 	// A stale pick the server rejected while this machine had already left the
 	// list for the session: there is no host there, so put the list back.
 	if(nm_lobby && !nm_host && mchNetLobbyTakeRebrowse()){
+		nm_board_finish();
 		nm_lobby = 0;
 		nm_browse = 1;
-		nm_refresh();
+		mchNetLobbyBrowseRefresh();
+		acsScrD -> PrepareChangeScreen(ACS_NET_GAME_SCR);
 		return;
 	}
 
@@ -1092,7 +1431,7 @@ void acsNetMenuQuant(void)
 		if(mchNetLobbyClientJoined()){
 			nm_browse = 0;
 			nm_lobby = 1;
-			nm_refresh();
+			nm_enter_board();
 			return;
 		}
 
@@ -1102,14 +1441,30 @@ void acsNetMenuQuant(void)
 
 	if(!nm_lobby) return;
 
-	mchNetLobbyQuant();
-
-	if(!nm_host && mchNetLobbyStarted()){
-		nm_capture_local();
-		mchNetLobbyClientArm();
-		nm_leave_to_race();
+	// The session is up, so the lobby is the hot-seat board.
+	if(!nm_board){
+		nm_enter_board();
 		return;
 	}
 
-	nm_refresh();
+	// Pump even while the assembly shop is up, so a long mechos edit does not
+	// look like a dropped client to the host.
+	mchNetLobbyQuant();
+
+	// The board's own drawing follows hsPlayers, so the roster goes in while
+	// the board - and only the board - is the current screen.
+	if(acsScrD -> curScr && acsScrD -> curScr -> ID == ACS_SPLIT_HS_SCR){
+		if(!nm_board_inited) nm_board_init();
+		nm_board_sync();
+	}
+
+	// The host started: adopt the world, drop the board and load.
+	if(!nm_host && mchNetLobbyStarted()){
+		nm_capture_local();
+		mchNetLobbyClientArm();
+		nm_board_finish();
+		nm_lobby = 0;
+		nm_leave_to_race();
+		return;
+	}
 }

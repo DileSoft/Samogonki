@@ -342,6 +342,12 @@ int  mchNetNumReady(void);
 const char* mchNetPlayerName(int slot);
 const char* mchNetStatus(void);
 
+// The lobby board's world pick. Host only for the setter; the getters are
+// safe anywhere and return 0 when no session is up.
+void mchNetLobbySetWorld(int world,int track);
+int  mchNetLobbyWorld(void);
+int  mchNetLobbyTrack(void);
+
 extern int mchPBEM_Game;
 extern int mchPBEM_GameMode;	// edit/view turn, etc.
 extern int mchPBEM_CurPlayer;
