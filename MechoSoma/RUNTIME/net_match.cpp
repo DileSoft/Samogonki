@@ -175,6 +175,12 @@ void netMatch::update_tick(unsigned int now)
 int netMatch::open_host(const char* server_name,unsigned char world_id,unsigned char track_id,unsigned char laps)
 {
 	_is_host = 1;
+
+	// The host is always slot 0. It used to be left unset, which is also the
+	// "no slot" the lobby reads - and the lobby board keys the editable row
+	// off it, so the host could not touch its own line.
+	_local_slot = NET_SLOT_HOST;
+
 	_state = NET_MATCH_LOBBY;
 	_max_players = NET_MAX_PLAYERS;
 

@@ -865,16 +865,13 @@ static void nm_board_sync(void)
 			hsPlayers[i].type = 1;		// human
 		}
 		else {
-			// A spare slot races as a bot, drawn here as a computer player.
-			// The figure is only a placeholder; the race hands the bot one
-			// that no player holds when the flag drops.
-			int f = i + 1;
-			if(f > acsMaxEssenceID) f = (f % acsMaxEssenceID) + 1;
-
-			sprintf(hsPlayers[i].configStr,"%d %d %d %d",f,
-				nm_first_spell(0),nm_first_spell(1),nm_first_spell(2));
+			// An empty slot is not shown as a bot. The board is the roster:
+			// only the players who are actually here appear, the rest read as
+			// disabled. Spare slots are still raced by bots when the flag
+			// drops, but that is the race's business, not the lobby's.
 			hsPlayers[i].name[0] = 0;
-			hsPlayers[i].type = 2;		// computer
+			hsPlayers[i].configStr[0] = 0;
+			hsPlayers[i].type = 0;		// disabled
 		}
 
 		// The mechos cell opens the assembly shop, and only this machine's
@@ -886,16 +883,27 @@ static void nm_board_sync(void)
 			p -> flags |= ACS_REDRAW_OBJECT;
 		}
 
-		// Names stay on the setup screen.
+		// The names are the roster's, not the hot-seat file's the field was
+		// seeded from. The field is short, so the name is cut to it; editing
+		// happens on the setup screen, so it is blocked here.
 		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_NAME + i);
-		if(p) p -> flags |= ACS_BLOCKED;
+		if(p){
+			char nb[64];
+			int lim = p -> MaxStrLen > 0 && p -> MaxStrLen < (int)sizeof(nb) - 1
+				? p -> MaxStrLen : (int)sizeof(nb) - 1;
 
-		// The type column is information here: a player is human, a spare
-		// slot is a computer. Nobody edits anybody's, their own included.
+			strncpy(nb,hsPlayers[i].name,lim);
+			nb[lim] = 0;
+			p -> set_string(nb);
+			p -> flags |= (ACS_BLOCKED | ACS_REDRAW_OBJECT);
+		}
+
+		// The type column is information here: a player is human, an empty
+		// slot is disabled. Nobody edits anybody's, their own included.
 		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_TYPE + i);
 		if(p){
 			p -> flags |= ACS_BLOCKED;
-			p -> CurState = present ? 1 : 2;
+			p -> CurState = present ? 1 : 0;
 			p -> flags |= ACS_REDRAW_OBJECT;
 		}
 	}

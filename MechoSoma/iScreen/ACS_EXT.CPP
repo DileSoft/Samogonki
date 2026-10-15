@@ -966,6 +966,14 @@ void acsHandleExtEvent(int code,int data0,int data1,int data2)
 			acsFinitShop(data0);
 			break;
 		case ACS_EXT_CHANGE_HS_WORLD:
+			// Over the net board the arrows pick the race's world and carry
+			// it to the clients in the roster, instead of moving the hot-seat
+			// game's world and its saved default.
+			if(acsNetBoardActive()){
+				acsNetBoardWorld(data0);
+				break;
+			}
+
 			if(data0)
 				p = mch_trackD -> NextTrack(hsWorld,hsTrack);
 			else

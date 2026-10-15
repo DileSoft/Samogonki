@@ -202,6 +202,10 @@ void acsShopChangePart(int tp,int dir);
 
 void acsDrawHS_CfgScreen(void);
 
+// Set while the net lobby uses the hot-seat board (see ACS_NET.CPP): an empty
+// slot there is disabled and draws no mechos, unlike a hot-seat row.
+extern int mchNetBoard;
+
 void acsShowSlotInfo(void);
 char* acsGetSaveString(int n);
 
@@ -1861,6 +1865,10 @@ void acsDrawHS_CfgScreen(void)
 	}
 
 	for(i = 0; i < HS_PLAYERS_MAX; i ++){
+		// Over the net lobby an empty slot is disabled and has no mechos to
+		// draw - the rows shown are the players, not the spare slots.
+		if(mchNetBoard && hsPlayers[i].type == 0) continue;
+
 		p = (aciScreenInputField*)scr -> GetObject(ACS_PLAYER0_MECHOS + i);
 		if(p){
 			x = round(float(p -> PosX)/mchA_d3dResX);
