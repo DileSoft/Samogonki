@@ -631,7 +631,7 @@ CameraCoords CameraDispatcher::bodyInput()
 	observer -> Alg().invXform(position);
 	position.y = 0;
 	position *= Mat3f(M_PI - G2R(currentCoords.angles.z), Z_AXIS);
-	position += observer -> R();
+	position += observer -> R() + observer -> render_offset;
 
 	if(!is_interpolating_timer){
 		targetCoords().position = position;
@@ -1374,7 +1374,7 @@ void CameraDispatcher::rotateWhenStopTime()
 void CameraDispatcher::centerMechosWhenStopTime()
 {
 	V_scroll.set(0.f);
-	targetCoords().position = observer -> R();
+	targetCoords().position = observer -> R() + observer -> render_offset;
 } 
 
 CameraCoords CameraDispatcher::stopTimeInput()

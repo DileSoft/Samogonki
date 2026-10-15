@@ -51,6 +51,7 @@ void Body::internal_init()
 	speed_avr = 0;
 	
 	mesh_offset.set(0.f);
+	render_offset.set(0.f);
 
 	disable_collision_mask = 0;
 	enable_collision_mask = ~0;
@@ -419,7 +420,7 @@ void Body::post_quant()
 		}
 
 	if(geometry)
-		geometry -> SetPosition(Alg(), Rgeometry());
+		geometry -> SetPosition(Alg(), Rgeometry() + render_offset);
 }
 
 void Body::write_state(XBuffer& buf)

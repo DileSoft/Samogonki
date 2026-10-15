@@ -1354,7 +1354,7 @@ void Mechos::post_quant()
 		float z_off = geometry -> zminReal();
 		MatXf Rot = MatXf(Mat3f::ID, Vect3f(0 , 0, z_off))*MatXf(Mat3f(-character_angles.y, Y_AXIS)*Mat3f(character_angles.x, X_AXIS), Vect3f::ZERO)*MatXf(Mat3f::ID, Vect3f(0 , 0, -z_off));
 
-		geometry -> SetPosition(pose()*MatXf(Mat3f::ID, mesh_offset)*Rot);
+		geometry -> SetPosition(MatXf(Mat3f::ID, render_offset)*pose()*MatXf(Mat3f::ID, mesh_offset)*Rot);
 
 		(this ->* forward_wheels_quant)();
 		(this ->* backward_wheels_quant)();

@@ -61,6 +61,18 @@ public:
 	*/
 	void setPoseExact(const Vect3f& pos,float psi);
 
+	/*
+		Render-only world offset. The mesh is drawn at its pose plus this, and
+		the follow camera anchors on it too, so both move together and a pose
+		correction can be spread over a few frames instead of snapping - the
+		client's own car in a net race is where it is used; everywhere else it
+		stays zero. See the smooth in net_apply_snapshot and the CameraDispatcher.
+
+		It is deliberately not part of the physics: the body is where it is,
+		the drawing lags for a moment and catches up.
+	*/
+	Vect3f render_offset;
+
 	// Translation //////	
 	void setTrans(const Vect3f& trans) { Xlg.trans() = trans; }
 	void setTrans(float coord, eAxis axis) { Xlg.trans()[axis] = coord; }
