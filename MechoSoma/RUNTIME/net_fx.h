@@ -121,6 +121,18 @@ void net_fx_update_actors(void);
 void net_fx_resend_actors(void);
 
 /*
+	Client side, once per frame: put every tracked actor on its interpolated
+	pose for now, exactly as net_apply_interpolation does for the racers. The
+	state batches land at NET_ACTOR_REPL_HZ, so drawing each one on arrival is
+	a fresh pose every replication interval - a bonus man falling from the sky
+	visibly steps. The buffer and the fixed delay fix that.
+
+	Host side this is a no-op: it never receives actor states, so every buffer
+	is empty.
+*/
+void net_fx_apply_actors(void);
+
+/*
 	Dynamic field sources - slime circles, red track, damage sensors. They are
 	BaseObjects in a field grid, not bodies, so attachBody never sees them and
 	they travelled nowhere before this. Called from BodyDispatcher: the host

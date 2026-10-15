@@ -650,7 +650,18 @@ static void net_send_snapshot(void)
 	places "now" on the host's line.
 */
 const int NET_INTERP_SAMPLES		= 3;
-const int NET_INTERP_DELAY_TICKS	= 2;
+
+// The draw sits this many ticks behind the newest snapshot. Two ticks is
+// enough to always bracket "now" between two known poses on a clean link, but
+// one lost snapshot then leaves nothing to interpolate against and the car
+// pauses, so three: a batch can be late and there is still a pair in hand.
+const int NET_INTERP_DELAY_TICKS	= 3;
+
+// How far past the newest snapshot a pose may be carried on its last velocity
+// before the draw gives up and holds instead. A snapshot that is a little late
+// is normal; extrapolating for long would run the car somewhere the host never
+// was, so this is a short leash - six ticks, 150 ms.
+const int NET_INTERP_EXTRAP_MAX_TICKS	= 6;
 
 struct netInterpSample
 {
@@ -751,7 +762,22 @@ static void net_interp_apply(int slot,mchMechosRacer* mr)
 		}
 
 	if(rt >= (float)b -> sample[b -> count - 1].tick){
+		float dt = rt - (float)b -> sample[b -> count - 1].tick;
+
 		i = b -> count - 1;
+
+		// A snapshot running late: carry the car on its last known velocity
+		// for a short while rather than freeze it, so a lost or delayed batch
+		// reads as the car continuing instead of pausing. Past the leash the
+		// extrapolated pose has run too far ahead to trust, so hold there.
+		if(dt <= (float)NET_INTERP_EXTRAP_MAX_TICKS){
+			pos = b -> sample[i].pos
+			    + b -> sample[i].vel * (dt * (float)NET_TICK_MS / 1000.0f);
+			mr -> setPositionExact(pos,b -> sample[i].yaw);
+			mr -> setGlobalVelocity(b -> sample[i].vel);
+			return;
+			}
+
 		mr -> setPositionExact(b -> sample[i].pos,b -> sample[i].yaw);
 		mr -> setGlobalVelocity(b -> sample[i].vel);
 		return;
@@ -862,40 +888,31 @@ int mchNetIsRemoteRacer(const mchRacer* r)
 }
 
 /*
-	Client side: correct the locally simulated car when it has really come off
-	the host's copy.
+	Client side: the fallback that snaps the local car back onto the host's
+	copy when the two have really come apart.
 
-	The local car has to be simulated here or a keypress would wait a round
-	trip, but it is the host's copy that everyone else sees. The two do not step
-	identically, yet left to themselves they stay within a few units (measured
-	with matched input): the difference is frame timing and the odd collision,
-	not a systematic drift. So the local sim is left completely alone in normal
-	driving, which is what keeps the steering responsive.
+	The snapshot path puts the car on the host's carried-forward pose every
+	tick, so in normal driving the two never drift; this is for the cases that
+	pose write cannot reach - a teleport the local sim missed, a snapshot
+	stall, a trap that moved the host's copy while this one drove on. Past a
+	wide threshold the host wins outright.
 
-	What it must not do is leave the car stranded away from the host, so past a
-	wide threshold the host wins outright with a snap. The snap used to be the
-	problem: setPosition() runs setPositionInit(), which zeroes the velocity and
-	forces the car integrates from, so each snap left the car standing while the
-	host drove on, it fell behind again at once, and the two were snapped over
-	and over - the once-a-second jump. Resuming on the host's velocity after the
-	snap is what makes it settle instead of repeating.
-
-	An earlier version eased the car across with a small per-frame translation.
-	That was worse than useless: shifting the pose without shifting the velocity
-	rocked the car and drove the two copies *further* apart (measured 0-9 units
-	untouched versus 0-80 with the easing), and the pull it took to hide that is
-	exactly what felt like sluggish steering.
+	The snap uses setPositionExact, so the host's z is kept (a ground query here
+	could hand back the deck of a bridge the car is under), and the host's
+	velocity goes back on because setPositionExact clears the car's own - a car
+	left standing here would just fall behind and be snapped again.
 
 	Teleports (the trap that freezes its victim, Formicary, MassShifter) are not
 	handled here: the trap freezes the local car through the synced feature and
 	the arrival event drops it on the target, so the error never grows into a
 	snap in the first place.
 */
+static const float NET_LOCAL_RECON_SNAP	= 60.0f;	// units: host wins past this
+
 static void net_reconcile_local(void)
 {
 	mchMechosRacer* mr;
 	const float half = (float)NET_WORLD_SIZE * 0.5f;
-	const float threshold = 40.0f;
 	Vect3f r;
 	float dx,dy,d2;
 
@@ -917,18 +934,12 @@ static void net_reconcile_local(void)
 
 	d2 = dx*dx + dy*dy;
 
-	if(d2 < threshold * threshold) return;
+	if(d2 < NET_LOCAL_RECON_SNAP * NET_LOCAL_RECON_SNAP) return;
 
 	net_log("client: local car %.0f units from the host, snapping",
 		Vect3f(dx,dy,0.0f).norm());
 
-	// Exact pose, not the ground-snapped one: the host's z is the whole point
-	// of the snap, and a ground query here could hand back the deck of a bridge
-	// the car is under. setPosition() still clears the velocity and forces.
 	mr -> setPositionExact(net_local_auth,net_local_auth_yaw);
-
-	// setPosition() cleared the velocity; resume on the host's, or the car
-	// sits still after the cut while the host's copy drives off.
 	mr -> setGlobalVelocity(net_local_auth_vel);
 }
 
@@ -1018,13 +1029,28 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			}
 
 		/*
-			The local car is put on the host's pose as soon as a snapshot
-			arrives, and left to simulate itself until the next one. The host
-			is authoritative, so it wins every 25 ms; the local simulation in
-			between is what keeps a keypress instant instead of a round trip.
-			net_reconcile_local only covers the case where snapshots stall.
+			Client side: put the local car on the host's pose, carried forward.
+
+			The host is authoritative, so its pose is what this car follows -
+			otherwise the two copies drift apart and everybody else sees a
+			different car than the driver does. The pose spent half a round
+			trip in flight, though, so applied raw it pulls the car back by
+			however far it travelled in that time, once per snapshot: a
+			sawtooth that only appears once there is latency. It is carried
+			forward on the host's own velocity by half the measured round trip,
+			which puts it where the host is now.
+
+			Applied through setPoseExact, which writes the pose and nothing
+			else. setPositionExact also clears the velocity and forces, and
+			clearing the angular velocity forty times a second collapsed the
+			car's turn rate every snapshot - that was the shake. The host's
+			velocity still goes back on, so the car drives on between snapshots.
 		*/
 		if(racers[i].slot == net_match_S -> local_slot()){
+			unsigned int rtt;
+			float age;
+			Vect3f carried;
+
 			net_local_auth.set(net_uq_world(racers[i].pos_x),
 					   net_uq_world(racers[i].pos_y),
 					   net_uq_height(racers[i].pos_z));
@@ -1034,17 +1060,15 @@ static void net_apply_snapshot(const void* data,unsigned int len)
 			net_local_auth_yaw = net_uq_yaw(racers[i].yaw);
 			net_local_auth_valid = 1;
 
-			// The host's pose, applied now. setPositionExact holds the z the
-			// host sent (a ground snap would drop a flying car every snapshot);
-			// it still clears the velocity and forces the car integrates from,
-			// so the host's velocity goes back on straight after - otherwise
-			// the car would stall for a frame every snapshot.
-			mr -> setPositionExact(net_local_auth,net_local_auth_yaw);
+			rtt = net_session_S ? net_session_S -> host_rtt() : 0;
+			age = (float)(rtt / 2) / 1000.0f;
+
+			carried.set(net_local_auth.x + net_local_auth_vel.x * age,
+				    net_local_auth.y + net_local_auth_vel.y * age,
+				    net_local_auth.z);
+
+			mr -> setPoseExact(carried,net_local_auth_yaw);
 			mr -> setGlobalVelocity(net_local_auth_vel);
-			// The same reset clears speed_avr, and the EMA that rebuilds it
-			// (0.06/frame) never catches up between 25 ms snapshots - the
-			// bonus pickup gate reads it, so the local car could not collect.
-			mr -> setAverageSpeed(net_local_auth_vel.norm());
 
 			// The teleport trap freezes its victim in place (and hides it)
 			// while it charges, then drops it on the target. Without this the
@@ -2976,6 +3000,12 @@ static void net_endgame_ai(void)
 	The sample is built from the raw controls rather than from what the
 	vehicle actually did, so the host re-derives the same smoothed traction
 	and rudder from the same starting state.
+
+	The same sample is handed back to the local car through set_net_input, so
+	the car this machine drives is driven by exactly the input the host will
+	apply - the wire quantization included. Running the raw keyboard locally
+	while the host ran the quantized copy let the two pull apart every tick,
+	which the snapshot's pose write then had to correct.
 */
 static void net_send_client_input(void)
 {
@@ -3006,8 +3036,6 @@ static void net_send_client_input(void)
 		rp -> get_bot_decision(br,bt);
 		in.traction = net_input_quantize(bt);
 		in.rudder = net_input_quantize(br);
-
-		rp -> set_net_input(in);
 		}
 	else {
 		mechos = dynamic_cast<mchMechosRacer*>(rp);
@@ -3022,6 +3050,19 @@ static void net_send_client_input(void)
 			in.rudder = 48;
 			}
 		}
+
+	/*
+		The same sample drives the local car.
+
+		The prediction only stays close to the host if the two run the same
+		input, and the wire format is quantized. Applying the raw keyboard
+		locally while the host decoded the quantized copy meant the two
+		simulations pulled apart a little every tick, which is what the
+		reconcile kept having to chase. set_net_input makes control() take the
+		net path here exactly as it does on the host, so this machine and the
+		host integrate the identical setpoint.
+	*/
+	rp -> set_net_input(in);
 
 	in.tick = net_match_S -> tick();
 
@@ -3117,8 +3158,13 @@ void mchNetQuant(void)
 	// snapshots are already in the buffer.
 	net_apply_interpolation();
 
-	// The local car is simulated here, but once a second it is checked against
-	// the host's copy and pulled back if the two have really come apart.
+	// Class C. Client only: tracked actors (bonus men, creatures) are drawn
+	// on the same kind of interpolated pose as the racers. Host side it is a
+	// no-op, because it never receives actor states.
+	net_fx_apply_actors();
+
+	// The snapshot path already put the local car on the host's pose; this is
+	// the fallback for when a snapshot did not arrive and the two came apart.
 	if(!mchNetHost)
 		net_reconcile_local();
 

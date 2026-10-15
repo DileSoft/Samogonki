@@ -593,10 +593,17 @@ struct netActorState
 // "Viewer" is any racer on the host, not just the local player: a remote
 // racer being chased is as relevant to look at as one's own car, and every
 // client is drawing all of them from the same snapshots anyway.
-const int NET_ACTOR_REPL_HZ			= 10;
+const int NET_ACTOR_REPL_HZ			= 20;
 const int NET_ACTOR_VIEW_RADIUS		= 1200;		// world units
 const int NET_ACTOR_SPAWN_RADIUS	= 2400;		// spawn this far out, tracked coarsely
 const int NET_MAX_ACTORS_PER_PACKET	= 16;
+
+// The draw sits this far behind the newest batch, the same idea as the racer
+// interpolation delay. One replication interval is 1000 / NET_ACTOR_REPL_HZ ms;
+// two intervals is what it takes to always bracket "now" with two batches even
+// after one is lost, expressed in net ticks. At 20 Hz and a 25 ms tick that is
+// 2 * 50 / 25 = 4. See net_fx_apply_actors.
+const int NET_ACTOR_INTERP_DELAY_TICKS	= 4;
 
 /* --------------------------- QUANTIZATION -------------------------------- */
 

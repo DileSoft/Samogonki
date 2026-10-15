@@ -364,6 +364,21 @@ int netSession::num_peers(void)
 	return _numPeers;
 }
 
+unsigned int netSession::host_rtt(void)
+{
+	// The local record is is_host and always first; the remote host is the
+	// other peer. On a client there is exactly one.
+	netEndpoint* ep = _peers -> first();
+
+	while(ep){
+		if(!ep -> is_host && ep -> hasAddr)
+			return ep -> rtt;
+		ep = ep -> next;
+	}
+
+	return 0;
+}
+
 int netSession::build_packet(unsigned char* buf,netEndpoint* ep,int type,int flags,const void* data,unsigned int len)
 {
 	netHeader* h = (netHeader*)buf;

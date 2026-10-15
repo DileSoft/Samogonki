@@ -52,6 +52,15 @@ public:
 	void setPose(const MatXf& pose) { Xlg = pose; setRot(); }
 	const MatXf& pose() const { return Xlg; }
 
+	/*
+		Put the body at a pose without the reset setPosition/setPositionExact
+		do: velocity, forces and turn rate are left alone, only the place and
+		heading change. For the client's own car, which is put on the host's
+		replicated pose every snapshot - clearing its angular velocity forty
+		times a second was what shook it. See net_apply_snapshot.
+	*/
+	void setPoseExact(const Vect3f& pos,float psi);
+
 	// Translation //////	
 	void setTrans(const Vect3f& trans) { Xlg.trans() = trans; }
 	void setTrans(float coord, eAxis axis) { Xlg.trans()[axis] = coord; }

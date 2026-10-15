@@ -49,6 +49,20 @@
 	Class B entities. See net_fx.h for why this shape and for what is left out.
 */
 
+// Client only: how many actor poses the interpolation buffer keeps. Three is
+// the racer buffer's size and for the same reason - two is the minimum to
+// interpolate, the third is slack for a late or reordered batch.
+const int NET_FX_ACTOR_SAMPLES = 3;
+
+struct netActorSample
+{
+	unsigned int tick;
+	Vect3f pos;
+	float yaw;
+	float vx;
+	float vy;
+};
+
 struct netFxEntry
 {
 	unsigned short entity_id;
@@ -66,6 +80,14 @@ struct netFxEntry
 	// moment as every other one that was already visible.
 	unsigned char spawn_sent;
 	unsigned int last_state_ms;
+
+	// Client only: the recent actor poses, oldest first, so the draw can
+	// interpolate between two batches a fixed delay behind the newest instead
+	// of jumping to each one as it lands. See net_fx_actor_remember and
+	// net_fx_apply_actors. Carried with the entry when a slot is compacted.
+	netActorSample interp[NET_FX_ACTOR_SAMPLES];
+	int interp_count;
+	unsigned int interp_last_ms;
 };
 
 static netFxEntry net_fx_table[NET_MAX_ENTITIES];
@@ -113,7 +135,16 @@ static int net_fx_field_count = 0;
 
 // State that arrived before the spawn it belongs to. Declared here rather
 // than next to the rest of the receive path because reset has to clear it.
-static netActorState net_fx_actor_pending[NET_MAX_ACTORS_PER_PACKET];
+// The host tick travels with it: the long path through this queue has to land
+// in the interpolation buffer with the same tick it was sent under, or the
+// draw's "now" would be wrong the first time the actor is seen.
+struct netFxPendingActor
+{
+	netActorState state;
+	unsigned int tick;
+};
+
+static netFxPendingActor net_fx_actor_pending[NET_MAX_ACTORS_PER_PACKET];
 static int net_fx_actor_pending_count = 0;
 static unsigned int net_fx_actor_ms = 0;
 
@@ -380,6 +411,8 @@ static int net_fx_register(unsigned short entity_id,int body_id,unsigned char ty
 	e -> spawn_sent = 0;
 	e -> last_state_ms = 0;
 	e -> is_actor = is_actor;
+	e -> interp_count = 0;
+	e -> interp_last_ms = 0;
 
 	net_fx_count ++;
 
@@ -1300,30 +1333,131 @@ void net_fx_despawn_recv(const unsigned char* data,unsigned int len)
 }
 
 /*
-	Push a state onto the body an entry tracks.
-
-	Pose and velocity, and nothing else: the actor keeps doing whatever it is
-	doing, only its place in the world is corrected. That is the same contract
-	the racers run under, and it is enough because the interval is short enough
-	that no scripted behaviour is visible in the gap between two batches.
+	Write an actor's pose. The vertical velocity is not carried: nothing
+	downstream reads it and keeping whatever the body already has is closer
+	than a number that crossed the wire.
 */
-static void net_fx_apply_actor_state(const netActorState* a,const netFxEntry* e)
+static void net_fx_actor_set(Body* b,const Vect3f& pos,float yaw,float vx,float vy)
 {
-	Body* b = Mdisp -> searchBody(e -> body_id);
+	b -> setPositionExact(pos,yaw);
+	b -> setGlobalVelocity(Vect3f(vx,vy,b -> Vglobal().z));
+}
 
-	if(!b || !b -> alive()) return;
+/*
+	Remember one received actor state, keyed by the host tick, oldest first.
 
-	// Vertical velocity is not carried: nothing would use it and a bonus man's
-	// arc is short enough that keeping whatever it already has between batches
-	// is closer than a number that crossed the wire.
-	b -> setPositionExact(Vect3f(net_uq_actor_pos(a -> pos_x),
-				    net_uq_actor_pos(a -> pos_y),
-				    net_uq_actor_pos(a -> pos_z)),
-			     net_uq_yaw(a -> yaw));
+	Not applied here: the draw walks the buffer a fixed delay behind the
+	newest batch. A non-newer tick is a reordered or duplicated datagram - a
+	repeat refreshes the newest sample, anything older is dropped - and both
+	keep the samples ascending, which is what the draw below walks.
+*/
+static void net_fx_actor_remember(int at,const netActorState* a,unsigned int tick)
+{
+	netFxEntry* e = &net_fx_table[at];
+	netActorSample* s;
 
-	b -> setGlobalVelocity(Vect3f(net_uq_signed_speed(a -> vel_x),
-				      net_uq_signed_speed(a -> vel_y),
-				      b -> Vglobal().z));
+	if(e -> interp_count && (int)(tick - e -> interp[e -> interp_count - 1].tick) <= 0){
+		if(tick == e -> interp[e -> interp_count - 1].tick)
+			s = &e -> interp[e -> interp_count - 1];
+		else
+			return;
+		}
+	else {
+		if(e -> interp_count >= NET_FX_ACTOR_SAMPLES){
+			for(int i = 1; i < NET_FX_ACTOR_SAMPLES; i ++)
+				e -> interp[i - 1] = e -> interp[i];
+
+			e -> interp_count = NET_FX_ACTOR_SAMPLES - 1;
+			}
+
+		s = &e -> interp[e -> interp_count ++];
+		s -> tick = tick;
+		}
+
+	s -> pos.set(net_uq_actor_pos(a -> pos_x),
+		     net_uq_actor_pos(a -> pos_y),
+		     net_uq_actor_pos(a -> pos_z));
+	s -> yaw = net_uq_yaw(a -> yaw);
+	s -> vx = net_uq_signed_speed(a -> vel_x);
+	s -> vy = net_uq_signed_speed(a -> vel_y);
+
+	e -> interp_last_ms = (unsigned int)clocki();
+}
+
+/*
+	Client side, once per frame: put every tracked actor on the interpolated
+	pose for now, the way net_apply_interpolation does for the racers.
+
+	Two batches are always kept and the draw sits a fixed delay behind the
+	newest, so a bonus man falling out of the sky is a smooth arc rather than
+	a fresh pose every replication interval. Behind the oldest or ahead of the
+	newest it holds the nearest end rather than extrapolate: a stall shows as
+	the actor pausing, never as a snap.
+*/
+void net_fx_apply_actors(void)
+{
+	unsigned int now = (unsigned int)clocki();
+
+	for(int i = 0; i < net_fx_count; i ++){
+		netFxEntry* e = &net_fx_table[i];
+		Body* b;
+		Vect3f pos;
+		float yaw,rt,a,d,vx,vy;
+		int j;
+
+		if(!e -> is_actor || e -> interp_count == 0) continue;
+
+		b = Mdisp ? Mdisp -> searchBody(e -> body_id) : NULL;
+
+		if(!b || !b -> alive()) continue;
+
+		// One batch so far: nothing to interpolate yet, so use it as it is.
+		if(e -> interp_count == 1){
+			net_fx_actor_set(b,e -> interp[0].pos,e -> interp[0].yaw,
+					 e -> interp[0].vx,e -> interp[0].vy);
+			continue;
+			}
+
+		// "Now" on the host's line: the newest tick plus however long it has
+		// been since that batch landed, pushed back by the delay.
+		rt = (float)e -> interp[e -> interp_count - 1].tick
+		   + (float)(now - e -> interp_last_ms) / (float)NET_TICK_MS
+		   - (float)NET_ACTOR_INTERP_DELAY_TICKS;
+
+		if(rt <= (float)e -> interp[0].tick){
+			net_fx_actor_set(b,e -> interp[0].pos,e -> interp[0].yaw,
+					 e -> interp[0].vx,e -> interp[0].vy);
+			continue;
+			}
+
+		if(rt >= (float)e -> interp[e -> interp_count - 1].tick){
+			j = e -> interp_count - 1;
+			net_fx_actor_set(b,e -> interp[j].pos,e -> interp[j].yaw,
+					 e -> interp[j].vx,e -> interp[j].vy);
+			continue;
+			}
+
+		for(j = 0; j + 1 < e -> interp_count; j ++)
+			if(rt < (float)e -> interp[j + 1].tick)
+				break;
+
+		a = (rt - (float)e -> interp[j].tick)
+		  / ((float)e -> interp[j + 1].tick - (float)e -> interp[j].tick);
+
+		pos = e -> interp[j].pos + (e -> interp[j + 1].pos - e -> interp[j].pos) * a;
+		vx = e -> interp[j].vx + (e -> interp[j + 1].vx - e -> interp[j].vx) * a;
+		vy = e -> interp[j].vy + (e -> interp[j + 1].vy - e -> interp[j].vy) * a;
+
+		// Angle goes the short way, or an actor crossing the 2*PI seam would
+		// spin the long way round in the gap between two batches.
+		yaw = e -> interp[j].yaw;
+		d = e -> interp[j + 1].yaw - yaw;
+		while(d > (float)M_PI) d -= 2.0f * (float)M_PI;
+		while(d < -(float)M_PI) d += 2.0f * (float)M_PI;
+		yaw += d * a;
+
+		net_fx_actor_set(b,pos,yaw,vx,vy);
+		}
 }
 
 /*
@@ -1341,7 +1475,7 @@ static void net_fx_apply_actor_state(const netActorState* a,const netFxEntry* e)
 */
 static const int NET_FX_PENDING_ROOM = NET_MAX_ACTORS_PER_PACKET;
 
-static void net_fx_pending_remember(const netActorState* a)
+static void net_fx_pending_remember(const netActorState* a,unsigned int tick)
 {
 	if(net_fx_actor_pending_count >= NET_FX_PENDING_ROOM){
 		for(int i = 1; i < net_fx_actor_pending_count; i ++)
@@ -1350,7 +1484,9 @@ static void net_fx_pending_remember(const netActorState* a)
 		net_fx_actor_pending_count = NET_FX_PENDING_ROOM - 1;
 		}
 
-	net_fx_actor_pending[net_fx_actor_pending_count ++] = *a;
+	net_fx_actor_pending[net_fx_actor_pending_count].state = *a;
+	net_fx_actor_pending[net_fx_actor_pending_count].tick = tick;
+	net_fx_actor_pending_count ++;
 }
 
 static void net_fx_pending_drain(void)
@@ -1358,18 +1494,18 @@ static void net_fx_pending_drain(void)
 	int left = 0;
 
 	for(int i = 0; i < net_fx_actor_pending_count; i ++){
-		const netActorState* a = &net_fx_actor_pending[i];
+		const netActorState* a = &net_fx_actor_pending[i].state;
 		int at = net_fx_find(a -> entity_id);
 
 		if(at < 0 || !net_fx_table[at].is_actor){
 			// Still waiting on the spawn, or never getting one. Either way it
 			// stays and is tried again on the next batch; only a full list
 			// drops one, and that happens in pending_remember.
-			net_fx_actor_pending[left ++] = *a;
+			net_fx_actor_pending[left ++] = net_fx_actor_pending[i];
 			continue;
 			}
 
-		net_fx_apply_actor_state(a,&net_fx_table[at]);
+		net_fx_actor_remember(at,a,net_fx_actor_pending[i].tick);
 		}
 
 	net_fx_actor_pending_count = left;
@@ -1381,23 +1517,20 @@ void net_fx_actor_recv(const unsigned char* data,unsigned int len)
 	netActorState batch[NET_MAX_ACTORS_PER_PACKET];
 	int count = net_actor_unpack(&hdr,batch,NET_MAX_ACTORS_PER_PACKET,data,(int)len);
 
-	// The header carries the host's tick, which is what an interpolation
-	// buffer would key off. There is no buffer: poses are applied as they
-	// arrive, so every tracked actor here moves at NET_ACTOR_REPL_HZ rather
-	// than smoothly.
-	(void)hdr;
-
+	// The header carries the host's tick, which is the interpolation buffer's
+	// timeline: it is uniform (the host advances it once per NET_TICK_MS),
+	// while arrivals are not. See net_fx_actor_remember.
 	for(int i = 0; i < count; i ++){
 		int at = net_fx_find(batch[i].entity_id);
 
 		// State for something this machine never had. Normally the spawn is
 		// still in flight and the drain below catches up with it.
 		if(at < 0 || !net_fx_table[at].is_actor){
-			net_fx_pending_remember(&batch[i]);
+			net_fx_pending_remember(&batch[i],hdr.server_tick);
 			continue;
 			}
 
-		net_fx_apply_actor_state(&batch[i],&net_fx_table[at]);
+		net_fx_actor_remember(at,&batch[i],hdr.server_tick);
 		}
 
 	net_fx_pending_drain();

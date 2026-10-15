@@ -116,6 +116,13 @@ public:
 
 	netEndpoint* get_peer(int id);
 	netEndpoint* get_peer_by_addr(const netAddr& addr);
+
+	// Client side: the measured round trip to the host peer, milliseconds, or
+	// 0 before one is known. The game layer carries a replicated pose forward
+	// by half of this so it lands in the present instead of half a round trip
+	// behind; see the local car in net_apply_snapshot.
+	unsigned int host_rtt(void);
+
 	int num_peers(void);
 
 	int state(void) const { return _state; }

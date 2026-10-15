@@ -353,6 +353,20 @@ void Body::setPositionExact(const Vect3f& pose, float psi)
 	Body::setPositionInit();
 }
 
+/*
+	The pose write with no housekeeping: place and heading only, velocity,
+	forces and turn rate untouched. See the header. R_prev is moved to the new
+	place so the frame's travelled distance - and the curvature read from it -
+	stays right.
+*/
+void DynamicBody::setPoseExact(const Vect3f& pos, float psi)
+{
+	Xlg = MatXf(Mat3f(-psi, Z_AXIS), pos);
+	CYCLE(Xlg.trans());
+	setRot();
+	R_prev = R();
+}
+
 void Body::setPosition(const Vect3f& pose, const Vect3f& target)
 {
 	Vect3f dr = getDist(target, Vect3f(pose.x, pose.y, target.z));
